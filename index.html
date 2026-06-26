@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>HML Wearable Simulator</title>
+  <link rel="stylesheet" href="css/simulator.css">
+</head>
+
+<body>
+  <div id="app">
+    <!-- Left panel: controls -->
+    <div id="controls">
+      <h2>Device</h2>
+      <div class="control-group">
+        <label>Screen Shape</label>
+        <select id="shape-select">
+          <option value="circle">Circle</option>
+          <option value="rect">Rectangle</option>
+        </select>
+      </div>
+      <div class="control-group">
+        <label>Resolution</label>
+        <div class="row">
+          <input type="number" id="width-input" value="466" min="100" max="1000">
+          <span>×</span>
+          <input type="number" id="height-input" value="466" min="100" max="1000">
+        </div>
+      </div>
+      <div class="control-group">
+        <label>Presets</label>
+        <div style="display:flex;flex-wrap:wrap;gap:0.25rem;">
+          <button class="preset-btn" data-preset="fit2">FIT2</button>
+          <button class="preset-btn" data-preset="gt3">GT3+</button>
+          <button class="preset-btn" data-preset="fit3">FIT3+</button>
+          <button class="preset-btn" data-preset="gt2-42">GT2 (42mm)</button>
+          <button class="preset-btn" data-preset="gt2-46">GT2 (46mm)</button>
+          <button class="preset-btn" data-preset="watchd">WATCH D</button>
+        </div>
+      </div>
+
+      <h2>Sensors</h2>
+      <div class="control-group">
+        <label>Battery <span id="battery-value">85%</span></label>
+        <input type="range" id="battery-slider" min="0" max="100" value="85">
+      </div>
+
+      <h2>WearEngine</h2>
+      <div class="control-group" id="wearengine-panel">
+        <label>Simulate phone messages</label>
+        <div class="msg-log" id="we-log"></div>
+        <div class="input-row">
+          <input type="text" id="we-input" placeholder="Type a message...">
+          <button id="we-send-btn">Send</button>
+        </div>
+      </div>
+
+      <h2>Crown</h2>
+      <div class="control-group">
+        <label style="display:flex;align-items:center;justify-content:space-between;cursor:pointer;">
+          <span>Invert Scroll</span>
+          <input type="checkbox" id="invert-scroll-toggle" checked style="width:1.25rem;height:1.25rem;cursor:pointer;">
+        </label>
+        <div style="font-size:0.8125rem;color:#86868b;margin-top:0.25rem;">切换鼠标滚轮滚动触发的滚动事件方向</div>
+      </div>
+
+      <h2>Log</h2>
+      <div id="log-panel"></div>
+    </div>
+
+    <!-- Center: watch viewport -->
+    <div id="watch-area">
+      <div id="status-bar">
+        <span id="app-info"></span>
+      </div>
+
+      <div id="watch-shell">
+        <div id="watch-frame" class="circle">
+          <div id="watch-content">
+
+          </div>
+        </div>
+        <div id="crown"></div>
+      </div>
+
+      <div id="drop-zone">
+        <input type="file" id="file-input" accept=".app,.zip" style="display:none;">
+        <div id="drop-hint">Load .app / Drag & drop here</div>
+      </div>
+    </div>
+
+    <!-- Libraries -->
+    <script src="libs/jszip.min.js"></script>
+
+    <!-- Core modules -->
+    <script src="js/unpacker.js"></script>
+    <script src="js/hml-compiler.js"></script>
+    <script src="js/css-adapter.js"></script>
+
+    <!-- Runtime -->
+    <script src="js/runtime/virtual-fs.js"></script>
+    <script src="js/runtime/system-apis.js"></script>
+    <script src="js/runtime/wearengine-mock.js"></script>
+    <script src="js/runtime/sandbox.js"></script>
+
+    <!-- UI -->
+    <script src="js/watch-renderer.js"></script>
+    <script src="js/crown-sim.js"></script>
+    <script src="js/touch-sim.js"></script>
+    <script src="js/sensor-panel.js"></script>
+
+    <!-- Main app -->
+    <script src="js/app.js"></script>
+</body>
+
+</html>
