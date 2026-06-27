@@ -12,6 +12,7 @@ const WatchRenderer = (() => {
   let _eventHandlers = {};
   let _rotationHandlers = [];
   let _swipeHandlers = [];
+  let _imageSrcResolver = null;
 
   function init() {
     _watchFrame = document.getElementById('watch-frame');
@@ -45,15 +46,26 @@ const WatchRenderer = (() => {
     const baseStyles = CSSAdapter.getWatchBaseStyles();
     const processedCSS = CSSAdapter.process(cssContent || '');
 
-    // Build full HTML
-    const fullHTML = `
-      <style>${baseStyles}</style>
-      <style>${processedCSS}</style>
-      <div class="page-container">${html}</div>
-    `;
+    // Build off-DOM then swap atomically to avoid flash
+    const frag = document.createDocumentFragment();
+    const s1 = document.createElement('style');
+    s1.textContent = baseStyles;
+    frag.appendChild(s1);
+    const s2 = document.createElement('style');
+    s2.textContent = processedCSS;
+    frag.appendChild(s2);
+    const container = document.createElement('div');
+    container.className = 'page-container';
+    container.innerHTML = html;
+    frag.appendChild(container);
 
-    // Inject into shadow DOM (isolated from simulator styles)
-    _shadowRoot.innerHTML = fullHTML;
+    // Atomic swap: clear + append in one frame
+    while (_shadowRoot.firstChild) _shadowRoot.removeChild(_shadowRoot.firstChild);
+    _shadowRoot.appendChild(frag);
+
+    // Fix image src: resolve .bin to .png/.jpg/.bmp if available
+    _fixImageSources();
+    _fixSwiperIndex();
 
     // Bind events
     bindEvents();
@@ -67,8 +79,10 @@ const WatchRenderer = (() => {
 
   /**
    * Render from a compiled ViewModel: inject DOM tree + stylesheet
+   * @param {Object} viewModel - The ViewModel instance
+   * @param {string} extraCss - Optional extra CSS content from separate .css files
    */
-  function renderViewModel(viewModel) {
+  function renderViewModel(viewModel, extraCss) {
     _currentPage = null;
     _pageData = viewModel._data || {};
     _refs = {};
@@ -76,6 +90,8 @@ const WatchRenderer = (() => {
 
     const baseStyles = CSSAdapter.getWatchBaseStyles();
     const vmStyles = viewModel.getStyleSheet ? viewModel.getStyleSheet() : '';
+    // Process extra CSS through the CSSAdapter to normalize OHOS quirks
+    const processedExtra = extraCss ? CSSAdapter.process(extraCss) : '';
 
     // Render the DOM tree
     let rootEl;
@@ -86,17 +102,32 @@ const WatchRenderer = (() => {
       rootEl = document.createElement('div');
     }
 
-    // Build full HTML with styles
-    _shadowRoot.innerHTML = `
-      <style>${baseStyles}</style>
-      <style>${vmStyles}</style>
-      <div class="page-container"></div>
-    `;
+    // Build off-DOM then swap atomically to avoid flash
+    const frag = document.createDocumentFragment();
+    const s1 = document.createElement('style');
+    s1.textContent = baseStyles;
+    frag.appendChild(s1);
+    const s2 = document.createElement('style');
+    s2.textContent = vmStyles;
+    frag.appendChild(s2);
+    if (processedExtra) {
+      const s3 = document.createElement('style');
+      s3.textContent = processedExtra;
+      frag.appendChild(s3);
+    }
+    const container = document.createElement('div');
+    container.className = 'page-container';
+    frag.appendChild(container);
 
-    const container = _shadowRoot.querySelector('.page-container');
+    // Atomic swap
+    while (_shadowRoot.firstChild) _shadowRoot.removeChild(_shadowRoot.firstChild);
+    _shadowRoot.appendChild(frag);
     if (container && rootEl) {
       container.appendChild(rootEl);
     }
+
+    _fixImageSources();
+    _fixSwiperIndex();
 
     // Bind refs and sync to ViewModel data
     bindRefs();
@@ -115,10 +146,52 @@ const WatchRenderer = (() => {
     const html = HMLCompiler.compile(_currentPage.hml, _pageData, _currentPage.path);
     const container = _shadowRoot.querySelector('.page-container');
     if (container) {
-      container.innerHTML = html;
+      // Use replaceChildren for atomic swap to avoid flash
+      const temp = document.createElement('div');
+      temp.innerHTML = html;
+      while (container.firstChild) container.removeChild(container.firstChild);
+      while (temp.firstChild) container.appendChild(temp.firstChild);
+      _fixImageSources();
       bindEvents();
       bindRefs();
     }
+  }
+
+  /**
+   * Set a function to resolve image src paths (e.g., .bin → .png/.jpg/.bmp)
+   * @param {Function} resolver - Function that takes a src string and returns a resolved src
+   */
+  function setImageSrcResolver(resolver) {
+    _imageSrcResolver = resolver;
+  }
+
+  /**
+   * Fix all <img> src attributes in the shadow DOM, resolving .bin to image files
+   */
+  function _fixImageSources() {
+    if (!_imageSrcResolver) return;
+    const imgs = _shadowRoot.querySelectorAll('img');
+    imgs.forEach(img => {
+      const src = img.getAttribute('src');
+      if (src) {
+        const resolved = _imageSrcResolver(src);
+        if (resolved !== src) {
+          img.setAttribute('src', resolved);
+        }
+      }
+    });
+  }
+
+  function _fixSwiperIndex() {
+    const swipers = _shadowRoot.querySelectorAll('swiper');
+    swipers.forEach(sw => {
+      const idx = parseInt(sw.getAttribute('index'), 10);
+      if (!isNaN(idx) && idx > 0) {
+        requestAnimationFrame(() => {
+          sw.scrollTo({ left: idx * sw.clientWidth, behavior: 'auto' });
+        });
+      }
+    });
   }
 
   /**
@@ -197,7 +270,7 @@ const WatchRenderer = (() => {
   function clear() {
     Sandbox.cleanupReactive();
     if (_shadowRoot) {
-      _shadowRoot.innerHTML = '';
+      while (_shadowRoot.firstChild) _shadowRoot.removeChild(_shadowRoot.firstChild);
     }
     _currentPage = null;
     _pageData = {};
@@ -208,6 +281,6 @@ const WatchRenderer = (() => {
 
   return {
     init, configure, renderPage, renderViewModel, updateData, registerHandler, getRef,
-    onRotation, triggerRotation, clear,
+    onRotation, triggerRotation, clear, setImageSrcResolver,
   };
 })();

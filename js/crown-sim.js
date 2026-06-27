@@ -45,7 +45,7 @@ const CrownSim = (() => {
   }
 
   function _emit(delta) {
-    if (_enabled && _onRotate) _onRotate(delta * _sensitivity);
+    if (_onRotate) _onRotate(delta * _sensitivity);
     _recordEvent(delta);
   }
 
@@ -59,18 +59,17 @@ const CrownSim = (() => {
   }
 
   function init() {
-    const watchFrame = document.getElementById('watch-frame');
-    if (!watchFrame) return;
+    _crown = document.getElementById('crown');
+    if (!_crown) return;
 
-    watchFrame.addEventListener('wheel', (e) => {
-      if (!_enabled) return;
+    _crown.addEventListener('wheel', (e) => {
       e.preventDefault();
+      e.stopPropagation();
       let delta = e.deltaY > 0 ? 1 : -1;
       if (_inverted) delta = -delta;
       _emit(delta);
     }, { passive: false });
 
-    _crown = document.getElementById('crown');
     if (_crown) {
       let dragging = false;
       let lastY = 0;
@@ -85,9 +84,10 @@ const CrownSim = (() => {
       document.addEventListener('mousemove', (e) => {
         if (!dragging) return;
         const dy = lastY - e.clientY;
-        if (Math.abs(dy) > 3) {
+        if (Math.abs(dy) > 30) {
+          const steps = Math.floor(Math.abs(dy) / 30);
           const delta = dy < 0 ? 1 : -1;
-          _emit(delta);
+          for (let i = 0; i < steps; i++) _emit(delta);
           lastY = e.clientY;
         }
       });

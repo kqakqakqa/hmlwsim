@@ -11,7 +11,7 @@ const CSSAdapter = (() => {
     let result = css;
 
     // Handle @import - convert paths (already handled by HML compiler)
-    // OHOS flex defaults: flex-direction: column, align-items: stretch
+    // OHOS flex defaults: flex-direction: row (except list which is column)
     // Browser flexbox defaults: flex-direction: row, align-items: stretch
 
     // Add base component styles
@@ -80,11 +80,35 @@ img {
   font-family: 'HarmonyOS Sans SC', 'PingFang SC', 'Microsoft YaHei', sans-serif;
   font-size: 30px;
   display: flex;
-  flex-direction: column;
+  flex-direction: row;
 }
-div, list, list-item, stack {
+list {
   display: flex;
   flex-direction: column;
+  overflow-y: auto;
+  overflow-x: hidden;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+}
+list::-webkit-scrollbar { display: none; }
+swiper {
+  display: flex;
+  flex-direction: row;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scroll-snap-type: x mandatory;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+}
+swiper::-webkit-scrollbar { display: none; }
+swiper > * {
+  flex-shrink: 0;
+  width: 100%;
+  height: 100%;
+  scroll-snap-align: start;
+}
+div, list-item {
+  display: flex;
 }
 text {
   display: inline;
@@ -93,13 +117,6 @@ img, image {
   object-fit: contain;
   display: block;
 }
-list {
-  overflow-y: auto;
-  overflow-x: hidden;
-  -webkit-overflow-scrolling: touch;
-  scrollbar-width: none;
-}
-list::-webkit-scrollbar { display: none; }
 list-item {
   flex-shrink: 0;
 }
@@ -120,6 +137,13 @@ input, button {
   outline: none;
   -webkit-appearance: none;
   appearance: none;
+}
+.page-container {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
 }
 `;
   }

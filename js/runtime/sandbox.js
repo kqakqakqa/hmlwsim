@@ -9,6 +9,7 @@ const Sandbox = (() => {
   let _onAppTerminate = null;
   let _lastViewModel = null;
   let _lastError = null;
+  let _imageSrcResolver = null;
 
   // Reactive dependency tracking system
   const _reactive = {
@@ -66,13 +67,32 @@ const Sandbox = (() => {
 
   function setOnAppTerminate(cb) { _onAppTerminate = cb; }
 
+  function setImageSrcResolver(resolver) { _imageSrcResolver = resolver; }
+
+  function _resolveImageSrc(src) {
+    // Check if the src can be resolved to an image file from app modules
+    // (handles both .bin from compiled apps and .png/.jpg/.bmp from unsigned apps)
+    if (typeof src === 'string' && _imageSrcResolver) {
+      return _imageSrcResolver(src);
+    }
+    return src;
+  }
+
   function _updateAttr(el, tag, key, val) {
     if (key === 'ref') {
       el.setAttribute('data-ref', String(val));
     } else if (tag === 'text' && key === 'value') {
       el.textContent = String(val);
     } else if (tag === 'image' && key === 'src') {
-      el.setAttribute('src', String(val));
+      el.setAttribute('src', _resolveImageSrc(String(val)));
+    } else if (tag === 'swiper' && key === 'index') {
+      el.setAttribute('index', String(val));
+      const idx = parseInt(val, 10);
+      if (!isNaN(idx)) {
+        requestAnimationFrame(() => {
+          el.scrollTo({ left: idx * el.clientWidth, behavior: 'smooth' });
+        });
+      }
     } else if (tag === 'progress') {
       if (key === 'type') {
         el.setAttribute('type', String(val));
@@ -257,7 +277,9 @@ const Sandbox = (() => {
     props = props || {};
     children = children || [];
 
-    const el = document.createElement(tag);
+    const htmlTag = tag === 'image' ? 'img' : tag;
+    const el = document.createElement(htmlTag);
+    if (tag === 'image') el.setAttribute('draggable', 'false');
 
     // Apply static inline styles
     if (props.staticStyle) applyStyles(el, props.staticStyle);
@@ -444,28 +466,74 @@ const Sandbox = (() => {
   }
 
   /**
-   * _l(array, renderFn) - List rendering (for)
-   * ace-loader compiles for="{{list}}" to _l(list, function(item, idx){ return _c(...) })
+   * Proxy an object so that property set triggers onMutate callback.
+   * Used by _l to detect item-level changes inside for loops.
    */
-  function _l(array, renderFn) {
-    const arr = typeof array === 'function' ? array() : array;
-    if (!arr || !Array.isArray(arr)) return null;
-    const fragment = document.createDocumentFragment();
-    arr.forEach((item, idx) => {
-      try {
-        const node = renderFn(item, idx);
-        if (node !== null && node !== undefined) {
-          if (node instanceof Node) {
-            fragment.appendChild(node);
-          } else if (typeof node === 'string' || typeof node === 'number') {
-            fragment.appendChild(document.createTextNode(String(node)));
-          }
-        }
-      } catch (e) {
-        console.error('[Sandbox] _l item render error:', e);
+  function _proxyItem(item, onMutate) {
+    if (item === null || typeof item !== 'object') return item;
+    if (item.__rp) return item;
+    return new Proxy(item, {
+      set(target, prop, value) {
+        if (prop === '__rp') { target[prop] = value; return true; }
+        const old = target[prop];
+        target[prop] = value;
+        if (old !== value) onMutate();
+        return true;
+      },
+      get(target, prop) {
+        if (prop === '__rp') return true;
+        return target[prop];
       }
     });
-    return fragment;
+  }
+
+  /**
+   * _l(array, renderFn) - List rendering (for) with reactive updates
+   * ace-loader compiles for="{{list}}" to _l(list, function(item, idx){ return _c(...) })
+   *
+   * Reactively re-renders when:
+   *   - The array reference changes (tracked via reactive deps on the getter)
+   *   - An item's property is reassigned (detected via shallow proxy on each item)
+   */
+  function _l(array, renderFn) {
+    const getArray = typeof array === 'function' ? array : () => array;
+
+    const { value: arr, deps } = _reactive.track(getArray);
+
+    const container = document.createElement('div');
+    container.style.display = 'contents';
+
+    function renderItems(items) {
+      while (container.firstChild) container.removeChild(container.firstChild);
+      if (!items || !Array.isArray(items)) return;
+
+      items.forEach((item, idx) => {
+        try {
+          const reactiveItem = (item !== null && typeof item === 'object')
+            ? _proxyItem(item, () => renderItems(getArray()))
+            : item;
+          const node = renderFn(reactiveItem, idx);
+          if (node !== null && node !== undefined) {
+            if (node instanceof Node) {
+              container.appendChild(node);
+            } else if (typeof node === 'string' || typeof node === 'number') {
+              container.appendChild(document.createTextNode(String(node)));
+            }
+          }
+        } catch (e) {
+          console.error('[Sandbox] _l item render error:', e);
+        }
+      });
+    }
+
+    renderItems(arr);
+
+    if (deps.size > 0) {
+      const unsub = _reactive.subscribe(deps, () => renderItems(getArray()));
+      _reactive.addCleanup(unsub);
+    }
+
+    return container;
   }
 
   /**
@@ -492,7 +560,7 @@ const Sandbox = (() => {
       set: (target, prop, value) => {
         const old = target[prop];
         target[prop] = value;
-        if (old !== value) {
+        if (old !== value || Array.isArray(value)) {
           _reactive.notify(prop);
         }
         return true;
@@ -586,7 +654,7 @@ const Sandbox = (() => {
     return vm;
   }
 
-  function createContext() {
+  function createContext(appData) {
     const ctx = {
       console: {
         log: (...args) => console.log('[App]', ...args),
@@ -606,7 +674,10 @@ const Sandbox = (() => {
           'system.sensor': SystemAPIs.sensor,
           'system.fetch': SystemAPIs.fetch,
           'system.wearengine': WearEngineMock,
-          'system.app': { terminate() { if (_onAppTerminate) _onAppTerminate(); } },
+          'system.app': {
+            terminate() { if (_onAppTerminate) _onAppTerminate(); },
+            getInfo() { return { bundleName: appData?.bundleName || 'unknown', versionCode: 1, versionName: appData?.version || '1.0.0', appName: appData?.bundleName || 'unknown' }; },
+          },
           'system.configuration': {},
         };
         return apiMap[moduleName] || {};
@@ -650,7 +721,7 @@ const Sandbox = (() => {
   }
 
   function setupGlobals(appData) {
-    const ctx = createContext();
+    const ctx = createContext(appData);
     setGlobal('requireNative', ctx.requireNative);
     setGlobal('FeatureAbility', ctx.FeatureAbility);
     setGlobal('_c', ctx._c);
@@ -719,7 +790,16 @@ const Sandbox = (() => {
   function initApp(appJsCode, appData) {
     _moduleCache.clear();
     _imports = {
-      app: { terminate() { if (_onAppTerminate) _onAppTerminate(); } },
+      app: {
+        getInfo() {
+          return {
+            appName: appData?.manifest?.appName || appData?.bundleName || '',
+            versionName: appData?.version || '',
+            versionCode: appData?.versionCode || 1,
+          };
+        },
+        terminate() { if (_onAppTerminate) _onAppTerminate(); },
+      },
       battery: SystemAPIs.battery,
       brightness: SystemAPIs.brightness,
       device: SystemAPIs.device,
@@ -731,7 +811,17 @@ const Sandbox = (() => {
     const result = executeModule(appJsCode, 'app', appData);
     _appExports = result;
     if (result) {
-      setGlobal('$app', result.data || result);
+      const appObj = result.data || result;
+      if (typeof appObj.setImports === 'function') {
+        appObj.setImports(_imports);
+      }
+      setGlobal('$app', appObj);
+      const _origGetImports = window.$app.getImports ? window.$app.getImports.bind(window.$app) : null;
+      window.$app.getImports = function() {
+        const base = _origGetImports ? _origGetImports() : {};
+        base.app = _imports.app;
+        return base;
+      };
     }
     return result;
   }
@@ -758,5 +848,16 @@ const Sandbox = (() => {
     _reactive.cleanup();
   }
 
-  return { initApp, initPage, reInitPage, getImports, getAppExports, setOnAppTerminate, getLastViewModel, setViewModelUpdateCallback, cleanupReactive, getLastError: () => _lastError };
+  function reset() {
+    _imports = {};
+    _appExports = null;
+    _moduleCache.clear();
+    _onAppTerminate = null;
+    _lastViewModel = null;
+    _lastError = null;
+    _imageSrcResolver = null;
+    cleanupReactive();
+  }
+
+  return { initApp, initPage, reInitPage, getImports, getAppExports, setOnAppTerminate, setImageSrcResolver, getLastViewModel, setViewModelUpdateCallback, cleanupReactive, reset, getLastError: () => _lastError };
 })();

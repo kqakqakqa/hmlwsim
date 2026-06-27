@@ -9,14 +9,12 @@ const WearEngineMock = (() => {
   let _msgSubscribers = [];
   let _incomingMessages = [];
 
-  function init() {
-    _peerDevice = {
-      mOsType: 1, // 1=Android, 2=iOS
-      mOsName: 'Android',
-      mDeviceName: 'Simulated Phone',
-    };
-    _registered = true;
-  }
+  _peerDevice = {
+    mOsType: 1, // 1=Android, 2=iOS
+    mOsName: 'Android',
+    mDeviceName: 'Simulated Phone',
+  };
+  _registered = true;
 
   function setPackageName(params) {
     _pairAppName = params.appName;
@@ -139,7 +137,7 @@ const WearEngineMock = (() => {
   }
 
   return {
-    init, setPackageName, setFingerprint, getPeerDevice, detect,
+    setPackageName, setFingerprint, getPeerDevice, detect,
     getWearEngineVersion, sendMsg, subscribeMsg, unsubscribeMsg,
     simulateIncomingMessage, simulateIncomingFile, reset,
   };

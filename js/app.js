@@ -21,6 +21,7 @@ const App = (() => {
     setupQuickLoad();
     setupLocalSelectAll();
     setupInvertScroll();
+    setupResetButton();
     log('Simulator ready. Drag a .app file onto the watch or use quick load.', 'info');
   }
 
@@ -139,11 +140,189 @@ const App = (() => {
     }
   }
 
+  function setupResetButton() {
+    const resetBtn = document.getElementById('reset-btn');
+    if (resetBtn) {
+      resetBtn.addEventListener('click', resetApp);
+    }
+  }
+
+  function resetApp() {
+    const appData = _appData;
+    if (!appData) {
+      log('No app loaded to refresh.', 'warn');
+      return;
+    }
+
+    log('Refreshing: ' + appData.bundleName, 'info');
+
+    // Reset Sandbox (also clears image src resolver)
+    Sandbox.reset();
+
+    // Re-register image src resolver
+    const imageResolver = (src) => {
+      const normalized = src.replace(/^\//, '');
+
+      // Try 1: exact match in modules
+      let data = appData.modules[normalized];
+      if (data) {
+        const ext = (normalized.match(/\.(\w+)$/) || [])[1] || 'png';
+        const mimeType = ext === 'jpg' || ext === 'jpeg' ? 'image/jpeg' : ext === 'bmp' ? 'image/bmp' : 'image/png';
+        const blob = data instanceof ArrayBuffer
+          ? new Blob([data], { type: mimeType })
+          : new Blob([data], { type: mimeType });
+        return URL.createObjectURL(blob);
+      }
+
+      // Try 2: .bin → .png/.jpg/.bmp
+      if (normalized.match(/\.bin$/i)) {
+        const basePath = normalized.replace(/\.bin$/i, '');
+        const extensions = ['.png', '.jpg', '.jpeg', '.bmp'];
+        for (const ext of extensions) {
+          const imgPath = basePath + ext;
+          data = appData.modules[imgPath];
+          if (data) {
+            const mimeType = ext === '.jpg' || ext === '.jpeg' ? 'image/jpeg' : ext === '.bmp' ? 'image/bmp' : 'image/png';
+            const blob = data instanceof ArrayBuffer
+              ? new Blob([data], { type: mimeType })
+              : new Blob([data], { type: mimeType });
+            return URL.createObjectURL(blob);
+          }
+        }
+
+        // Try 2b: parse .bin directly
+        data = appData.modules[normalized];
+        if (data && data.byteLength > 0) {
+          const ab = data instanceof ArrayBuffer ? data : data.buffer;
+          const parsed = parseBinImage(ab);
+          if (parsed) return parsed;
+        }
+      }
+
+      // Try 3: resources/ prefix
+      const resourcePaths = ['base/media/', 'rawfile/'];
+      for (const prefix of resourcePaths) {
+        const resourceKey = prefix + normalized.replace(/^common\//, '');
+        data = appData.resources?.[resourceKey];
+        if (data) {
+          const ext = (normalized.match(/\.(\w+)$/) || [])[1] || 'png';
+          const mimeType = ext === 'jpg' || ext === 'jpeg' ? 'image/jpeg' : ext === 'bmp' ? 'image/bmp' : 'image/png';
+          const blob = data instanceof ArrayBuffer
+            ? new Blob([data], { type: mimeType })
+            : new Blob([data], { type: mimeType });
+          return URL.createObjectURL(blob);
+        }
+      }
+
+      return src;
+    };
+    Sandbox.setImageSrcResolver(imageResolver);
+    WatchRenderer.setImageSrcResolver(imageResolver);
+
+    // Clear VirtualFS
+    VirtualFS.clear();
+
+    // Clear page history
+    _pageHistory = [];
+    _currentPage = null;
+    _appExports = null;
+
+    // Re-initialize VirtualFS with app data
+    if (appData.files) {
+      for (const [path, data] of Object.entries(appData.files)) {
+        VirtualFS.writeFile(path, data);
+      }
+    }
+
+    // Re-execute app.js
+    if (appData.appJs) {
+      _appExports = Sandbox.initApp(appData.appJs, appData);
+      const appErr = Sandbox.getLastError();
+      if (appErr) log('App Sandbox error: ' + appErr.message, 'error');
+      if (_appExports && _appExports.onCreate) _appExports.onCreate();
+    }
+
+    // Re-navigate to first page
+    SystemAPIs.onNavigate(async (pageInfo) => {
+      if (!pageInfo) { WatchRenderer.clear(); return; }
+      await navigateTo(pageInfo.uri, pageInfo.params);
+    });
+
+    if (appData.pages.length > 0) {
+      navigateTo(appData.pages[0], {});
+    }
+
+    log('App refreshed.', 'info');
+  }
+
   async function loadAppFile(file) {
     log('Loading: ' + file.name, 'info');
     try {
       const appData = await Unpacker.loadFromFile(file);
       _appData = appData;
+
+      // Register image src resolver: resolve src paths to blob URLs from app modules
+      const imageResolver = (src) => {
+        // Normalize: remove leading slash
+        const normalized = src.replace(/^\//, '');
+
+        // Try 1: exact match in modules (e.g. /common/folder-48px.png → common/folder-48px.png)
+        let data = appData.modules[normalized];
+        if (data) {
+          const ext = (normalized.match(/\.(\w+)$/) || [])[1] || 'png';
+          const mimeType = ext === 'jpg' || ext === 'jpeg' ? 'image/jpeg' : ext === 'bmp' ? 'image/bmp' : 'image/png';
+          const blob = data instanceof ArrayBuffer
+            ? new Blob([data], { type: mimeType })
+            : new Blob([data], { type: mimeType });
+          return URL.createObjectURL(blob);
+        }
+
+        // Try 2: .bin → .png/.jpg/.bmp (compiled apps where compiler renamed .png to .bin)
+        if (normalized.match(/\.bin$/i)) {
+          const basePath = normalized.replace(/\.bin$/i, '');
+          const extensions = ['.png', '.jpg', '.jpeg', '.bmp'];
+          for (const ext of extensions) {
+            const imgPath = basePath + ext;
+            data = appData.modules[imgPath];
+            if (data) {
+              const mimeType = ext === '.jpg' || ext === '.jpeg' ? 'image/jpeg' : ext === '.bmp' ? 'image/bmp' : 'image/png';
+              const blob = data instanceof ArrayBuffer
+                ? new Blob([data], { type: mimeType })
+                : new Blob([data], { type: mimeType });
+              return URL.createObjectURL(blob);
+            }
+          }
+
+          // Try 2b: parse .bin directly (Huawei ace-loader lite-image2bin format)
+          data = appData.modules[normalized];
+          if (data && data.byteLength > 0) {
+            const ab = data instanceof ArrayBuffer ? data : data.buffer;
+            const parsed = parseBinImage(ab);
+            if (parsed) return parsed;
+          }
+        }
+
+        // Try 3: try matching with resources/ prefix
+        const resourcePaths = ['base/media/', 'rawfile/'];
+        for (const prefix of resourcePaths) {
+          const resourceKey = prefix + normalized.replace(/^common\//, '');
+          data = appData.resources?.[resourceKey];
+          if (data) {
+            const ext = (normalized.match(/\.(\w+)$/) || [])[1] || 'png';
+            const mimeType = ext === 'jpg' || ext === 'jpeg' ? 'image/jpeg' : ext === 'bmp' ? 'image/bmp' : 'image/png';
+            const blob = data instanceof ArrayBuffer
+              ? new Blob([data], { type: mimeType })
+              : new Blob([data], { type: mimeType });
+            return URL.createObjectURL(blob);
+          }
+        }
+
+        // Fallback: return original path (will likely not load, but no crash)
+        return src;
+      };
+      Sandbox.setImageSrcResolver(imageResolver);
+      WatchRenderer.setImageSrcResolver(imageResolver);
+
       log('Bundle: ' + appData.bundleName, 'info');
       log('Version: ' + appData.version + ' | Device: ' + appData.deviceType, 'info');
       log('Pages: ' + appData.pages.join(', '), 'info');
@@ -195,7 +374,7 @@ const App = (() => {
   async function navigateTo(pageUri, params) {
     log('Navigate: ' + pageUri, 'info');
 
-    const pagePath = pageUri;
+    const pagePath = pageUri.replace(/^\//, '');
     const jsKey = pagePath + '.js';
 
     let pageExports = null;
@@ -245,7 +424,22 @@ const App = (() => {
         return;
       }
 
-      WatchRenderer.renderViewModel(pageExports);
+      // Also load any separate .css file that might exist alongside the compiled ViewModel
+      // (Some SDK versions output both compiled JS and raw CSS files)
+      const compiledCssKey = pagePath + '.css';
+      var compiledCssContent = _appData.modules[compiledCssKey] || '';
+      if (compiledCssContent) {
+        // Resolve @import in CSS
+        const importRegex = /@import\s+["']([^"']+)["'];?/g;
+        let importMatch;
+        while ((importMatch = importRegex.exec(compiledCssContent))) {
+          const resolvedPath = resolveRelativePath(pagePath, importMatch[1]);
+          const importedCSS = _appData.modules[resolvedPath] || '';
+          compiledCssContent = compiledCssContent.replace(importMatch[0], importedCSS);
+        }
+      }
+
+      WatchRenderer.renderViewModel(pageExports, compiledCssContent);
       registerPageHandlers(pageExports, pageExports._data);
 
       if (pageExports.onShow) {
@@ -353,6 +547,45 @@ const App = (() => {
   }
 
 
+
+  /**
+   * Parse a Huawei .bin image (from ace-loader lite-image2bin) into a data URL.
+   * Format: [4B magic=0x100][4B packed width|height][BGRA pixels]
+   * @returns {string|null} data:image/png URL or null if parse fails
+   */
+  function parseBinImage(arrayBuffer) {
+    try {
+      const dv = new DataView(arrayBuffer);
+      if (dv.byteLength < 8) return null;
+      const magic = dv.getUint32(0, true);
+      if (magic !== 256) return null;
+      const packed = dv.getUint32(4, true);
+      const width = (packed >> 16) & 0xFFFF;
+      const height = packed & 0xFFFF;
+      if (width <= 0 || height <= 0 || width > 4096 || height > 4096) return null;
+      const pixelBytes = width * height * 4;
+      if (dv.byteLength < 8 + pixelBytes) return null;
+      const canvas = document.createElement('canvas');
+      canvas.width = width;
+      canvas.height = height;
+      const ctx = canvas.getContext('2d');
+      const imgData = ctx.createImageData(width, height);
+      const dst = imgData.data;
+      let off = 8;
+      for (let i = 0; i < dst.length; i += 4) {
+        dst[i]     = dv.getUint8(off + 2, true);
+        dst[i + 1] = dv.getUint8(off + 1, true);
+        dst[i + 2] = dv.getUint8(off, true);
+        dst[i + 3] = dv.getUint8(off + 3, true);
+        off += 4;
+      }
+      ctx.putImageData(imgData, 0, 0);
+      return canvas.toDataURL('image/png');
+    } catch (e) {
+      console.warn('[App] Failed to parse .bin image:', e);
+      return null;
+    }
+  }
 
   function log(text, type) {
     const logPanel = document.getElementById('log-panel');
