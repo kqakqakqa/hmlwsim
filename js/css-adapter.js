@@ -1,67 +1,9 @@
 /**
- * CSS Adapter - Normalizes OHOS flex CSS for browser rendering
+ * CSS Adapter - Default styles for the watch viewport.
+ * Matches OHOS Lite Wearable rendering defaults so compiled apps look correct.
  */
 const CSSAdapter = (() => {
 
-  /**
-   * Process OHOS CSS to browser-compatible CSS
-   * OHOS uses flexbox by default; most properties map directly.
-   */
-  function process(css) {
-    let result = css;
-
-    // Handle @import - convert paths (already handled by HML compiler)
-    // OHOS flex defaults: flex-direction: row (except list which is column)
-    // Browser flexbox defaults: flex-direction: row, align-items: stretch
-
-    // Add base component styles
-    const baseStyles = `
-.ohos-stack {
-  position: relative;
-}
-.ohos-stack > * {
-  position: absolute;
-  top: 0;
-  left: 0;
-}
-.ohos-text {
-  display: inline;
-}
-.ohos-image {
-  object-fit: contain;
-  display: block;
-}
-.ohos-progress {
-  -webkit-appearance: none;
-  appearance: none;
-}
-span, div {
-  word-wrap: break-word;
-  overflow-wrap: break-word;
-}
-img {
-  object-fit: contain;
-  display: block;
-}
-`;
-
-    // Convert OHOS-specific CSS quirks
-    // align-items: center in OHOS is same as CSS
-    // justify-content: center is same as CSS
-    // flex-direction: column is same as CSS
-
-    // OHOS uses 'background-color' (same as CSS)
-    // OHOS uses 'border-radius' (same as CSS)
-    // OHOS uses 'margin-*' (same as CSS)
-    // OHOS uses 'padding-*' (same as CSS)
-
-    return baseStyles + '\n' + result;
-  }
-
-  /**
-   * Get default styles for the watch viewport.
-   * Matches OHOS Lite Wearable rendering defaults so compiled apps look correct.
-   */
   function getWatchBaseStyles() {
     return `
 * {
@@ -100,6 +42,12 @@ swiper {
   -webkit-overflow-scrolling: touch;
   scrollbar-width: none;
 }
+swiper[vertical="true"] {
+  flex-direction: column;
+  overflow-x: hidden;
+  overflow-y: auto;
+  scroll-snap-type: y mandatory;
+}
 swiper::-webkit-scrollbar { display: none; }
 swiper > * {
   flex-shrink: 0;
@@ -112,6 +60,7 @@ div, list-item {
 }
 text {
   display: inline;
+  white-space: pre-wrap;
 }
 img, image {
   object-fit: contain;
@@ -138,6 +87,13 @@ input, button {
   -webkit-appearance: none;
   appearance: none;
 }
+input[type="button"] {
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  padding: 0;
+  border-radius: 0;
+}
 .page-container {
   width: 100%;
   height: 100%;
@@ -148,5 +104,5 @@ input, button {
 `;
   }
 
-  return { process, getWatchBaseStyles };
+  return { getWatchBaseStyles };
 })();

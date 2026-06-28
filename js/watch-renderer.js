@@ -6,7 +6,6 @@ const WatchRenderer = (() => {
   let _watchContent = null;
   let _shadowRoot = null;
   let _cssRules = [];
-  let _currentPage = null;
   let _pageData = {};
   let _refs = {};
   let _eventHandlers = {};
@@ -31,67 +30,17 @@ const WatchRenderer = (() => {
   }
 
   /**
-   * Render a page: compile HML, inject CSS, bind events
-   */
-  function renderPage(pageConfig, pageData, cssContent, appModules) {
-    _currentPage = pageConfig;
-    _pageData = pageData || {};
-    _refs = {};
-    _eventHandlers = {};
-
-    // Compile HML to HTML
-    const html = HMLCompiler.compile(pageConfig.hml, _pageData, pageConfig.path);
-
-    // Process CSS
-    const baseStyles = CSSAdapter.getWatchBaseStyles();
-    const processedCSS = CSSAdapter.process(cssContent || '');
-
-    // Build off-DOM then swap atomically to avoid flash
-    const frag = document.createDocumentFragment();
-    const s1 = document.createElement('style');
-    s1.textContent = baseStyles;
-    frag.appendChild(s1);
-    const s2 = document.createElement('style');
-    s2.textContent = processedCSS;
-    frag.appendChild(s2);
-    const container = document.createElement('div');
-    container.className = 'page-container';
-    container.innerHTML = html;
-    frag.appendChild(container);
-
-    // Atomic swap: clear + append in one frame
-    while (_shadowRoot.firstChild) _shadowRoot.removeChild(_shadowRoot.firstChild);
-    _shadowRoot.appendChild(frag);
-
-    // Fix image src: resolve .bin to .png/.jpg/.bmp if available
-    _fixImageSources();
-    _fixSwiperIndex();
-
-    // Bind events
-    bindEvents();
-
-    // Bind refs
-    bindRefs();
-    if (pageData) {
-      pageData.$refs = _refs;
-    }
-  }
-
-  /**
    * Render from a compiled ViewModel: inject DOM tree + stylesheet
    * @param {Object} viewModel - The ViewModel instance
    * @param {string} extraCss - Optional extra CSS content from separate .css files
    */
   function renderViewModel(viewModel, extraCss) {
-    _currentPage = null;
     _pageData = viewModel._data || {};
     _refs = {};
     _eventHandlers = {};
 
     const baseStyles = CSSAdapter.getWatchBaseStyles();
     const vmStyles = viewModel.getStyleSheet ? viewModel.getStyleSheet() : '';
-    // Process extra CSS through the CSSAdapter to normalize OHOS quirks
-    const processedExtra = extraCss ? CSSAdapter.process(extraCss) : '';
 
     // Render the DOM tree
     let rootEl;
@@ -110,9 +59,9 @@ const WatchRenderer = (() => {
     const s2 = document.createElement('style');
     s2.textContent = vmStyles;
     frag.appendChild(s2);
-    if (processedExtra) {
+    if (extraCss) {
       const s3 = document.createElement('style');
-      s3.textContent = processedExtra;
+      s3.textContent = extraCss;
       frag.appendChild(s3);
     }
     const container = document.createElement('div');
@@ -133,27 +82,6 @@ const WatchRenderer = (() => {
     bindRefs();
     if (viewModel._data) {
       viewModel._data.$refs = _refs;
-    }
-  }
-
-  /**
-   * Update data bindings (re-render with new data)
-   */
-  function updateData(newData) {
-    if (!_currentPage) return;
-    Object.assign(_pageData, newData);
-
-    const html = HMLCompiler.compile(_currentPage.hml, _pageData, _currentPage.path);
-    const container = _shadowRoot.querySelector('.page-container');
-    if (container) {
-      // Use replaceChildren for atomic swap to avoid flash
-      const temp = document.createElement('div');
-      temp.innerHTML = html;
-      while (container.firstChild) container.removeChild(container.firstChild);
-      while (temp.firstChild) container.appendChild(temp.firstChild);
-      _fixImageSources();
-      bindEvents();
-      bindRefs();
     }
   }
 
@@ -187,8 +115,13 @@ const WatchRenderer = (() => {
     swipers.forEach(sw => {
       const idx = parseInt(sw.getAttribute('index'), 10);
       if (!isNaN(idx) && idx > 0) {
+        const isVertical = sw.getAttribute('vertical') === 'true';
         requestAnimationFrame(() => {
-          sw.scrollTo({ left: idx * sw.clientWidth, behavior: 'auto' });
+          if (isVertical) {
+            sw.scrollTo({ top: idx * sw.clientHeight, behavior: 'auto' });
+          } else {
+            sw.scrollTo({ left: idx * sw.clientWidth, behavior: 'auto' });
+          }
         });
       }
     });
@@ -272,7 +205,6 @@ const WatchRenderer = (() => {
     if (_shadowRoot) {
       while (_shadowRoot.firstChild) _shadowRoot.removeChild(_shadowRoot.firstChild);
     }
-    _currentPage = null;
     _pageData = {};
     _refs = {};
     _eventHandlers = {};
@@ -280,7 +212,7 @@ const WatchRenderer = (() => {
   }
 
   return {
-    init, configure, renderPage, renderViewModel, updateData, registerHandler, getRef,
+    init, configure, renderViewModel, registerHandler, getRef,
     onRotation, triggerRotation, clear, setImageSrcResolver,
   };
 })();

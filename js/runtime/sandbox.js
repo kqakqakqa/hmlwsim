@@ -89,8 +89,13 @@ const Sandbox = (() => {
       el.setAttribute('index', String(val));
       const idx = parseInt(val, 10);
       if (!isNaN(idx)) {
+        const isVertical = el.getAttribute('vertical') === 'true';
         requestAnimationFrame(() => {
-          el.scrollTo({ left: idx * el.clientWidth, behavior: 'smooth' });
+          if (isVertical) {
+            el.scrollTo({ top: idx * el.clientHeight, behavior: 'smooth' });
+          } else {
+            el.scrollTo({ left: idx * el.clientWidth, behavior: 'smooth' });
+          }
         });
       }
     } else if (tag === 'progress') {
@@ -290,11 +295,31 @@ const Sandbox = (() => {
         if (typeof fn === 'function') {
           const { value: val, deps } = _reactive.track(fn);
           const cssProp = STYLE_PROP_MAP[key] || key;
-          el.style[cssProp] = formatStyleValue(key, val);
+          if (val !== undefined && val !== null) {
+            el.style[cssProp] = formatStyleValue(key, val);
+          } else {
+            // Style function failed on first call (e.g. data not ready yet).
+            // Schedule a deferred retry so it can pick up values that were set
+            // outside of the ViewModel's reactive Proxy (e.g. uiSizes.init()).
+            requestAnimationFrame(() => {
+              try {
+                const retryVal = fn();
+                if (retryVal !== undefined && retryVal !== null) {
+                  el.style[cssProp] = formatStyleValue(key, retryVal);
+                }
+              } catch (_) { }
+            });
+          }
           if (deps.size > 0) {
             const unsub = _reactive.subscribe(deps, () => {
-              const newVal = fn();
-              el.style[cssProp] = formatStyleValue(key, newVal);
+              try {
+                const newVal = fn();
+                if (newVal !== undefined && newVal !== null) {
+                  el.style[cssProp] = formatStyleValue(key, newVal);
+                }
+              } catch (e) {
+                console.warn('[DynamicStyle] update error for', tag, key, e);
+              }
             });
             _reactive.addCleanup(unsub);
           }
@@ -536,6 +561,30 @@ const Sandbox = (() => {
     return container;
   }
 
+  function _wrapReactive(obj, notifyKey) {
+    if (obj === null || typeof obj !== 'object') return obj;
+    if (obj.__rp) return obj;
+    if (obj.__rpProxy) return obj.__rpProxy;
+
+    const proxy = new Proxy(obj, {
+      get(target, prop) {
+        if (prop === '__rp') return true;
+        if (prop === '__rpProxy') return proxy;
+        _reactive.record(notifyKey);
+        return target[prop];
+      },
+      set(target, prop, value) {
+        if (prop === '__rp' || prop === '__rpProxy') { target[prop] = value; return true; }
+        target[prop] = value;
+        _reactive.notify(notifyKey);
+        return true;
+      }
+    });
+
+    obj.__rpProxy = proxy;
+    return proxy;
+  }
+
   /**
    * ViewModel - wraps HarmonyOS component definitions
    * Returns a callable function with all component properties attached
@@ -555,10 +604,17 @@ const Sandbox = (() => {
     vm.data = new Proxy(data, {
       get: (target, prop) => {
         _reactive.record(prop);
-        return target[prop];
+        const val = target[prop];
+        if (val !== null && typeof val === 'object' && !val.__rp) {
+          return _wrapReactive(val, prop);
+        }
+        return val;
       },
       set: (target, prop, value) => {
         const old = target[prop];
+        if (value !== null && typeof value === 'object' && !value.__rp) {
+          value = _wrapReactive(value, prop);
+        }
         target[prop] = value;
         if (old !== value || Array.isArray(value)) {
           _reactive.notify(prop);
@@ -580,7 +636,7 @@ const Sandbox = (() => {
       }
     }
 
-    vm.render = function() {
+    vm.render = function () {
       if (!vm._renderFn) return document.createElement('div');
       _lastViewModel = vm;
       try {
@@ -591,7 +647,7 @@ const Sandbox = (() => {
       }
     };
 
-    vm.getStyleSheet = function() {
+    vm.getStyleSheet = function () {
       if (!styleSheet) return '';
       let css = '';
 
@@ -694,7 +750,9 @@ const Sandbox = (() => {
       Promise: window.Promise,
       Math: window.Math, Date: window.Date, JSON: window.JSON,
       parseInt: window.parseInt, parseFloat: window.parseFloat, isNaN: window.isNaN,
+      encodeURI: window.encodeURI,
       encodeURIComponent: window.encodeURIComponent,
+      decodeURI: window.decodeURI,
       decodeURIComponent: window.decodeURIComponent,
       String: window.String, Number: window.Number, Boolean: window.Boolean,
       Array: window.Array, Object: window.Object, RegExp: window.RegExp,
@@ -732,7 +790,7 @@ const Sandbox = (() => {
 
   function cleanupGlobals() {
     for (const key of _globalKeys) {
-      try { delete window[key]; } catch (_) {}
+      try { delete window[key]; } catch (_) { }
     }
     _globalKeys.length = 0;
   }
@@ -817,7 +875,7 @@ const Sandbox = (() => {
       }
       setGlobal('$app', appObj);
       const _origGetImports = window.$app.getImports ? window.$app.getImports.bind(window.$app) : null;
-      window.$app.getImports = function() {
+      window.$app.getImports = function () {
         const base = _origGetImports ? _origGetImports() : {};
         base.app = _imports.app;
         return base;
@@ -827,11 +885,6 @@ const Sandbox = (() => {
   }
 
   function initPage(pageCode, pagePath, appData) {
-    _moduleCache.delete(pagePath);
-    return executeModule(pageCode, pagePath, appData);
-  }
-
-  function reInitPage(pageCode, pagePath, appData) {
     _moduleCache.delete(pagePath);
     return executeModule(pageCode, pagePath, appData);
   }
@@ -859,5 +912,5 @@ const Sandbox = (() => {
     cleanupReactive();
   }
 
-  return { initApp, initPage, reInitPage, getImports, getAppExports, setOnAppTerminate, setImageSrcResolver, getLastViewModel, setViewModelUpdateCallback, cleanupReactive, reset, getLastError: () => _lastError };
+  return { initApp, initPage, getImports, getAppExports, setOnAppTerminate, setImageSrcResolver, getLastViewModel, setViewModelUpdateCallback, cleanupReactive, reset, getLastError: () => _lastError };
 })();
