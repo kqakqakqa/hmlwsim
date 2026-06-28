@@ -1,7 +1,8 @@
 /**
- * Virtual Filesystem - Simulates internal://app/ storage
+ * Device Feature: Virtual Filesystem
+ * Simulates internal://app/ storage using Map + localStorage
  */
-const VirtualFS = (() => {
+const DeviceFeatureVirtualFS = (() => {
   const store = new Map();
   const LS_PREFIX = 'hmlwsim_fs_';
 
@@ -60,6 +61,17 @@ const VirtualFS = (() => {
   }
 
   /**
+   * Write file (alias for writeText without append, used by app.js)
+   */
+  function writeFile(uri, text) {
+    const path = normalizePath(uri);
+    store.set(path, text);
+    try {
+      localStorage.setItem(LS_PREFIX + path, text);
+    } catch (e) {}
+  }
+
+  /**
    * List directory
    */
   function list(uri, callbacks) {
@@ -70,12 +82,10 @@ const VirtualFS = (() => {
       if (path.startsWith(dirPath)) {
         const relative = path.substring(dirPath.length);
         if (relative.includes('/') || relative.includes('\\')) {
-          // It's in a subdirectory - list immediate children
           const parts = relative.replace(/\\/g, '/').split('/').filter(Boolean);
           if (parts.length === 1) {
             fileList.push({ uri: toInternalPath(path), type: 0 }); // 0 = file
           } else {
-            // Directory
             const dirName = parts[0];
             const dirEntry = fileList.find(f => f.uri.endsWith(dirName));
             if (!dirEntry) {
@@ -182,7 +192,6 @@ const VirtualFS = (() => {
         store.set(normalized, content);
         try { localStorage.setItem(LS_PREFIX + normalized, content); } catch (e) {}
       } else if (content instanceof ArrayBuffer) {
-        // Binary files - store as base64
         const base64 = arrayBufferToBase64(content);
         store.set(normalized, base64);
         try { localStorage.setItem(LS_PREFIX + normalized, base64); } catch (e) {}
@@ -209,5 +218,5 @@ const VirtualFS = (() => {
     keys.forEach(k => localStorage.removeItem(k));
   }
 
-  return { init, readText, writeText, list, mkdir, deleteFile, move, copy, getInfo, importFiles, clear };
+  return { init, readText, writeText, writeFile, list, mkdir, deleteFile, move, copy, getInfo, importFiles, clear };
 })();

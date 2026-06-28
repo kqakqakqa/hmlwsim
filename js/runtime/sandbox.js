@@ -719,26 +719,10 @@ const Sandbox = (() => {
         error: (...args) => console.error('[App:error]', ...args),
       },
       requireNative: (moduleName) => {
-        const apiMap = {
-          'system.router': SystemAPIs.router,
-          'system.battery': SystemAPIs.battery,
-          'system.brightness': SystemAPIs.brightness,
-          'system.device': SystemAPIs.device,
-          'system.file': SystemAPIs.file,
-          'system.storage': SystemAPIs.storage,
-          'system.vibrator': SystemAPIs.vibrator,
-          'system.sensor': SystemAPIs.sensor,
-          'system.fetch': SystemAPIs.fetch,
-          'system.wearengine': WearEngineMock,
-          'system.app': {
-            terminate() { if (_onAppTerminate) _onAppTerminate(); },
-            getInfo() { return { bundleName: appData?.bundleName || 'unknown', versionCode: 1, versionName: appData?.version || '1.0.0', appName: appData?.bundleName || 'unknown' }; },
-          },
-          'system.configuration': {},
-        };
-        return apiMap[moduleName] || {};
+        if (moduleName === 'system.configuration') return {};
+        return ApiRegistry.resolve(moduleName);
       },
-      FeatureAbility: WearEngineMock,
+      FeatureAbility: ApiSimWearengine,
       _c: _c,
       _i: _i,
       _l: _l,
@@ -781,7 +765,7 @@ const Sandbox = (() => {
   function setupGlobals(appData) {
     const ctx = createContext(appData);
     setGlobal('requireNative', ctx.requireNative);
-    setGlobal('FeatureAbility', ctx.FeatureAbility);
+    setGlobal('FeatureAbility', ApiSimWearengine);
     setGlobal('_c', ctx._c);
     setGlobal('_i', ctx._i);
     setGlobal('_l', ctx._l);
@@ -847,24 +831,17 @@ const Sandbox = (() => {
 
   function initApp(appJsCode, appData) {
     _moduleCache.clear();
+    DeviceFeatureAppLifecycle.setAppData(appData);
+    DeviceFeaturePageNav.setAppData(appData);
     _imports = {
-      app: {
-        getInfo() {
-          return {
-            appName: appData?.manifest?.appName || appData?.bundleName || '',
-            versionName: appData?.version || '',
-            versionCode: appData?.versionCode || 1,
-          };
-        },
-        terminate() { if (_onAppTerminate) _onAppTerminate(); },
-      },
-      battery: SystemAPIs.battery,
-      brightness: SystemAPIs.brightness,
-      device: SystemAPIs.device,
-      file: SystemAPIs.file,
-      storage: SystemAPIs.storage,
-      vibrator: SystemAPIs.vibrator,
-      wearengine: WearEngineMock,
+      app: ApiSimApp,
+      battery: ApiSimBattery,
+      brightness: ApiSimBrightness,
+      device: ApiSimDevice,
+      file: ApiSimFile,
+      storage: ApiSimStorage,
+      vibrator: ApiSimVibrator,
+      wearengine: ApiSimWearengine,
     };
     const result = executeModule(appJsCode, 'app', appData);
     _appExports = result;

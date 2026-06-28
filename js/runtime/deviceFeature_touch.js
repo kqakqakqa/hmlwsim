@@ -1,7 +1,9 @@
 /**
- * Touch Simulator - Touch/click event forwarding + swipe gesture detection
+ * Device Feature: Touch
+ * Simulates touch/click event forwarding + swipe gesture detection.
+ * No corresponding apiSim — pure input device feature, events dispatched via CustomEvent.
  */
-const TouchSim = (() => {
+const DeviceFeatureTouch = (() => {
   let _enabled = false;
 
   let _startX = 0;

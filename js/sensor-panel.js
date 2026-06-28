@@ -22,7 +22,7 @@ const SensorPanel = (() => {
       _batterySlider.addEventListener('input', () => {
         const val = parseInt(_batterySlider.value);
         if (_batteryValue) _batteryValue.textContent = val + '%';
-        SystemAPIs.setBatteryLevel(val / 100);
+        DeviceFeatureBattery.setBatteryLevel(val / 100);
         if (_onConfigChange) _onConfigChange(getConfig());
       });
     }

@@ -1,7 +1,10 @@
 /**
- * Watch Renderer - Renders compiled HTML+CSS into the watch viewport
+ * Device Feature: Display
+ * Manages watch display rendering (shape, resolution, brightness).
+ * Renders compiled HarmonyOS ViewModel into Shadow DOM.
+ * Migrated from watch-renderer.js — display is a device feature.
  */
-const WatchRenderer = (() => {
+const DeviceFeatureDisplay = (() => {
   let _watchFrame = null;
   let _watchContent = null;
   let _shadowRoot = null;
@@ -13,6 +16,12 @@ const WatchRenderer = (() => {
   let _swipeHandlers = [];
   let _imageSrcResolver = null;
 
+  // Device info state
+  let _windowWidth = 466;
+  let _windowHeight = 466;
+  let _screenShape = 'circle';
+  let _brightnessMode = 1;
+
   function init() {
     _watchFrame = document.getElementById('watch-frame');
     _watchContent = document.getElementById('watch-content');
@@ -20,13 +29,34 @@ const WatchRenderer = (() => {
   }
 
   /**
-   * Configure watch display
+   * Configure watch display dimensions and shape
    */
   function configure(width, height, isCircle) {
+    _windowWidth = width;
+    _windowHeight = height;
+    _screenShape = isCircle ? 'circle' : 'rect';
     if (!_watchFrame) return;
     _watchFrame.style.width = width + 'px';
     _watchFrame.style.height = height + 'px';
     _watchFrame.className = isCircle ? 'circle' : 'rect';
+  }
+
+  /**
+   * Get device info (for apiSim_device)
+   */
+  function getDeviceInfo() {
+    return { windowWidth: _windowWidth, windowHeight: _windowHeight, screenShape: _screenShape };
+  }
+
+  /**
+   * Brightness management (for apiSim_brightness)
+   */
+  function getBrightnessMode() {
+    return _brightnessMode;
+  }
+
+  function setBrightnessMode(mode) {
+    _brightnessMode = mode;
   }
 
   /**
@@ -47,7 +77,7 @@ const WatchRenderer = (() => {
     try {
       rootEl = viewModel.render();
     } catch (e) {
-      console.error('[WatchRenderer] ViewModel render error:', e);
+      console.error('[DeviceFeatureDisplay] ViewModel render error:', e);
       rootEl = document.createElement('div');
     }
 
@@ -87,7 +117,6 @@ const WatchRenderer = (() => {
 
   /**
    * Set a function to resolve image src paths (e.g., .bin → .png/.jpg/.bmp)
-   * @param {Function} resolver - Function that takes a src string and returns a resolved src
    */
   function setImageSrcResolver(resolver) {
     _imageSrcResolver = resolver;
@@ -214,5 +243,6 @@ const WatchRenderer = (() => {
   return {
     init, configure, renderViewModel, registerHandler, getRef,
     onRotation, triggerRotation, clear, setImageSrcResolver,
+    getDeviceInfo, getBrightnessMode, setBrightnessMode,
   };
 })();

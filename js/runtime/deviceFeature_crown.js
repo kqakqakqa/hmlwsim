@@ -1,7 +1,9 @@
 /**
- * Crown Simulator - Mouse wheel / drag → rotation events
+ * Device Feature: Crown
+ * Simulates the watch crown (rotating input) via mouse wheel / drag.
+ * No corresponding apiSim — pure input device feature, events dispatched via callbacks.
  */
-const CrownSim = (() => {
+const DeviceFeatureCrown = (() => {
   let _enabled = false;
   let _sensitivity = 1;
   let _inverted = false;
