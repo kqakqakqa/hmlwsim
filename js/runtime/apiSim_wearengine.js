@@ -38,7 +38,7 @@ const ApiSimWearengine = (() => {
   }
 
   function getWearEngineVersion(callbacks) {
-    const version = 'Simulated WearEngine 3.0.0';
+    const version = 'Infinity.Infinity';
     callbacks.complete && callbacks.complete(version);
     callbacks.success && callbacks.success(version);
   }

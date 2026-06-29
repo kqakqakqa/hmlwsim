@@ -45,7 +45,22 @@ const DeviceFeatureDisplay = (() => {
    * Get device info (for apiSim_device)
    */
   function getDeviceInfo() {
-    return { windowWidth: _windowWidth, windowHeight: _windowHeight, screenShape: _screenShape };
+    const lang = navigator.language;
+    const parts = lang.split('-');
+    return {
+      brand: 'kqakqakqa',
+      manufacturer: 'kqakqakqa',
+      model: 'hmlwsim',
+      product: 'hmlwsim',
+      language: parts[0],
+      region: parts[1],
+      windowWidth: _windowWidth,
+      windowHeight: _windowHeight,
+      screenShape: _screenShape,
+      screenDensity: Math.round((window.devicePixelRatio || 1) * 96),
+      apiVersion: Infinity,
+      deviceType: 'liteWearable',
+    };
   }
 
   /**
