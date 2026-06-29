@@ -57,6 +57,7 @@ swiper > * {
 }
 div, list-item {
   display: flex;
+  overflow: hidden;
 }
 text {
   display: inline;
@@ -71,6 +72,7 @@ list-item {
 }
 stack {
   position: relative;
+  overflow: hidden;
 }
 stack > * {
   position: absolute;

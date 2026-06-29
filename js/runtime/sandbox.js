@@ -714,14 +714,14 @@ const Sandbox = (() => {
         return val;
       },
       set(target, prop, value) {
-        if (prop === '__rp' || prop === '__rpProxy') { target[prop] = value; return true; }
+        if (prop === '__rp' || prop === '__rpProxy') { Object.defineProperty(target, prop, { value, enumerable: false, configurable: true, writable: true }); return true; }
         target[prop] = value;
         _reactive.notify(notifyKey);
         return true;
       }
     });
 
-    obj.__rpProxy = proxy;
+    Object.defineProperty(obj, '__rpProxy', { value: proxy, enumerable: false, configurable: true, writable: true });
     return proxy;
   }
 
