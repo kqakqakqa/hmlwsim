@@ -144,7 +144,19 @@ const DeviceFeaturePageNav = (() => {
       const sr = root && root.shadowRoot;
       if (!sr) return;
       sr.querySelectorAll('[data-ref]').forEach(el => {
-        if (el._rotationFocused) {
+        if (!el._rotationFocused) return;
+        if (el.tagName === 'SLIDER') {
+          const min = parseFloat(el.getAttribute('min')) || 0;
+          const max = parseFloat(el.getAttribute('max')) || 100;
+          const step = parseFloat(el.getAttribute('step')) || 1;
+          let val = parseFloat(el.getAttribute('value')) || 0;
+          val = Math.min(max, Math.max(min, val - delta * step));
+          el.setAttribute('value', val);
+          const changeEvent = new CustomEvent('change', { bubbles: true, cancelable: true });
+          changeEvent.value = val;
+          changeEvent.progress = val;
+          el.dispatchEvent(changeEvent);
+        } else if (el.tagName === 'LIST') {
           el.scrollTop -= delta * 30;
         }
       });

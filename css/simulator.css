@@ -91,6 +91,17 @@ textarea {
   box-shadow: 0 0.0625rem 0.25rem rgba(0, 0, 0, 0.15);
 }
 
+.control-group input[type="range"]:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.control-group input[type="range"]:disabled::-webkit-slider-thumb {
+  background: #aeaeb2;
+  cursor: not-allowed;
+  box-shadow: none;
+}
+
 .control-group select,
 .control-group input[type="number"],
 .control-group input[type="text"] {
@@ -430,4 +441,26 @@ textarea {
 
 #watch-content input:active {
   background: #005bb5;
+}
+
+/* Library loading overlay */
+#lib-loading-overlay {
+  position: absolute;
+  inset: 0;
+  background: rgba(255, 255, 255, 0.9);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 10;
+  border-radius: inherit;
+}
+
+#lib-loading-overlay.hidden {
+  display: none;
+}
+
+#lib-loading-text {
+  color: #808080;
+  font-size: 0.875rem;
+  font-weight: 500;
 }

@@ -4,19 +4,34 @@
 const SensorPanel = (() => {
   let _batterySlider = null;
   let _batteryValue = null;
+  let _useSystemBattery = null;
   let _shapeSelect = null;
   let _widthInput = null;
   let _heightInput = null;
   let _onConfigChange = null;
+  let _systemBatteryInterval = null;
 
   function init(callbacks) {
     _onConfigChange = callbacks.onConfigChange;
 
     _batterySlider = document.getElementById('battery-slider');
     _batteryValue = document.getElementById('battery-value');
+    _useSystemBattery = document.getElementById('use-system-battery');
     _shapeSelect = document.getElementById('shape-select');
     _widthInput = document.getElementById('width-input');
     _heightInput = document.getElementById('height-input');
+
+    if (_useSystemBattery) {
+      _useSystemBattery.addEventListener('change', () => {
+        const useSystem = _useSystemBattery.checked;
+        if (_batterySlider) _batterySlider.disabled = useSystem;
+        if (useSystem) {
+          startSystemBattery();
+        } else {
+          stopSystemBattery();
+        }
+      });
+    }
 
     if (_batterySlider) {
       _batterySlider.addEventListener('input', () => {
@@ -41,6 +56,38 @@ const SensorPanel = (() => {
         if (_onConfigChange) _onConfigChange(getConfig());
       });
     }
+
+    startSystemBattery();
+  }
+
+  function startSystemBattery() {
+    if (!navigator.getBattery) return;
+    navigator.getBattery().then(battery => {
+      updateSystemBattery(battery);
+      battery.addEventListener('levelchange', () => updateSystemBattery(battery));
+      battery.addEventListener('chargingchange', () => updateSystemBattery(battery));
+    });
+    _systemBatteryInterval = setInterval(() => {
+      if (!_useSystemBattery || !_useSystemBattery.checked) return;
+      navigator.getBattery().then(battery => updateSystemBattery(battery));
+    }, 1000);
+  }
+
+  function stopSystemBattery() {
+    if (_systemBatteryInterval) {
+      clearInterval(_systemBatteryInterval);
+      _systemBatteryInterval = null;
+    }
+  }
+
+  function updateSystemBattery(battery) {
+    if (!_useSystemBattery || !_useSystemBattery.checked) return;
+    const level = battery.level;
+    DeviceFeatureBattery.setBatteryLevel(level);
+    const pct = Math.round(level * 100);
+    if (_batterySlider) _batterySlider.value = pct;
+    if (_batteryValue) _batteryValue.textContent = pct + '%';
+    if (_onConfigChange) _onConfigChange(getConfig());
   }
 
   function getConfig() {

@@ -197,14 +197,10 @@ const DeviceFeatureDisplay = (() => {
       const refName = el.getAttribute('data-ref');
       _refs[refName] = el;
 
-      // Add rotation support for list refs
-      if (el.tagName === 'LIST') {
+      // Add rotation support for list and slider refs
+      if (el.tagName === 'LIST' || el.tagName === 'SLIDER') {
         el.rotation = (opts) => {
-          if (opts.focus) {
-            _refs[refName]._rotationFocused = true;
-          } else {
-            _refs[refName]._rotationFocused = false;
-          }
+          el._rotationFocused = !!opts.focus;
         };
       }
     });

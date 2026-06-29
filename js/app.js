@@ -154,7 +154,7 @@ const App = (() => {
       return;
     }
     if (typeof html2canvas === 'undefined') {
-      log('html2canvas not loaded.', 'error');
+      log('Libraries still loading, please wait...', 'warn');
       return;
     }
 
@@ -321,6 +321,10 @@ const App = (() => {
   }
 
   async function loadAppFile(file) {
+    if (typeof JSZip === 'undefined') {
+      log('Libraries still loading, please wait...', 'warn');
+      return;
+    }
     log('Loading: ' + file.name, 'info');
     try {
       // Destroy current page and app lifecycle
