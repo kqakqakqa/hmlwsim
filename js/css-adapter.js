@@ -86,13 +86,20 @@ input, button {
   outline: none;
   -webkit-appearance: none;
   appearance: none;
+  font-size: inherit;
 }
 input[type="button"] {
-  background: transparent;
-  color: inherit;
-  font: inherit;
-  padding: 0;
-  border-radius: 0;
+  background: #0071e3;
+  color: #fff;
+  padding: 16px 36px;
+  border-radius: 999px;
+  font-weight: 500;
+  cursor: pointer;
+  text-align: center;
+  min-width: 160px;
+}
+input::placeholder {
+  color: rgba(255,255,255,0.6);
 }
 .page-container {
   width: 100%;

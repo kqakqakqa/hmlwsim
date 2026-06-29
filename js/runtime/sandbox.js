@@ -54,6 +54,10 @@ const Sandbox = (() => {
       if (subs) subs.forEach(cb => cb());
     },
 
+    removeKey(key) {
+      this._subscriptions.delete(key);
+    },
+
     addCleanup(fn) {
       this._cleanupFns.push(fn);
     },
@@ -81,6 +85,8 @@ const Sandbox = (() => {
   function _updateAttr(el, tag, key, val) {
     if (key === 'ref') {
       el.setAttribute('data-ref', String(val));
+    } else if (key === 'show') {
+      el.style.display = val ? '' : 'none';
     } else if (tag === 'text' && key === 'value') {
       el.textContent = String(val);
     } else if (tag === 'image' && key === 'src') {
@@ -460,12 +466,21 @@ const Sandbox = (() => {
 
     // Append children
     if (Array.isArray(children)) {
+      let lastSibling = null;
       children.forEach(child => {
         if (child === null || child === undefined) return;
-        if (typeof child === 'string' || typeof child === 'number') {
-          el.appendChild(document.createTextNode(String(child)));
+        if (child && child._l) {
+          child.mount(el, lastSibling);
+          if (child.state.nodes.length > 0) {
+            lastSibling = child.state.nodes[child.state.nodes.length - 1];
+          }
+        } else if (typeof child === 'string' || typeof child === 'number') {
+          const t = document.createTextNode(String(child));
+          el.appendChild(t);
+          lastSibling = t;
         } else if (child instanceof Node) {
           el.appendChild(child);
+          lastSibling = child;
         }
       });
     }
@@ -476,40 +491,117 @@ const Sandbox = (() => {
   /**
    * _i(condition, renderFn) - Conditional rendering (if/elif/else/show)
    * ace-loader compiles if/elif/else/show to _i() calls
+   * Now supports reactive re-rendering when condition dependencies change.
    */
   function _i(condition, renderFn) {
-    const val = typeof condition === 'function' ? condition() : condition;
-    if (val) {
+    const getCondition = typeof condition === 'function' ? condition : () => condition;
+
+    const { value: initialVal, deps } = _reactive.track(getCondition);
+
+    const state = { nodes: [], parent: null, ref: null };
+
+    function clearNodes() {
+      for (const n of state.nodes) {
+        if (n.parentNode) n.parentNode.removeChild(n);
+      }
+      state.nodes.length = 0;
+    }
+
+    function renderContent() {
+      clearNodes();
       try {
-        return renderFn();
+        const node = renderFn();
+        if (node !== null && node !== undefined) {
+          if (node instanceof Node) {
+            state.nodes.push(node);
+          } else if (typeof node === 'string' || typeof node === 'number') {
+            state.nodes.push(document.createTextNode(String(node)));
+          }
+        }
       } catch (e) {
         console.error('[Sandbox] _i render error:', e);
-        return null;
+      }
+      insertNodes();
+    }
+
+    function insertNodes() {
+      if (!state.parent || state.nodes.length === 0) return;
+      const frag = document.createDocumentFragment();
+      state.nodes.forEach(n => frag.appendChild(n));
+      if (state.ref && state.ref.parentNode === state.parent) {
+        state.parent.insertBefore(frag, state.ref.nextSibling);
+      } else {
+        state.parent.insertBefore(frag, state.parent.firstChild);
+      }
+      if (state.nodes.length > 0) {
+        state.ref = state.nodes[state.nodes.length - 1];
       }
     }
-    return null;
+
+    function mount(parent, ref) {
+      state.parent = parent;
+      state.ref = ref;
+      if (state.nodes.length > 0) {
+        insertNodes();
+      }
+    }
+
+    if (initialVal) {
+      renderContent();
+    }
+
+    if (deps.size > 0) {
+      let wasVisible = !!initialVal;
+      const unsub = _reactive.subscribe(deps, () => {
+        const newVal = !!getCondition();
+        if (newVal === wasVisible) return;
+        wasVisible = newVal;
+        if (newVal) {
+          renderContent();
+        } else {
+          clearNodes();
+        }
+      });
+      _reactive.addCleanup(unsub);
+    }
+
+    return { _l: true, state, mount };
   }
 
   /**
-   * Proxy an object so that property set triggers onMutate callback.
+   * Proxy an object so that property access/set goes through _reactive.
    * Used by _l to detect item-level changes inside for loops.
    */
+  const _itemKeys = new WeakMap();
+  let _itemKeySeq = 0;
+  const _proxyCache = new WeakMap();
+
   function _proxyItem(item, onMutate) {
     if (item === null || typeof item !== 'object') return item;
-    if (item.__rp) return item;
-    return new Proxy(item, {
+    if (_proxyCache.has(item)) return _proxyCache.get(item);
+    if (item.__itemKey) return item;
+
+    if (!_itemKeys.has(item)) _itemKeys.set(item, '_i' + (_itemKeySeq++));
+    const key = _itemKeys.get(item);
+
+    const proxy = new Proxy(item, {
       set(target, prop, value) {
-        if (prop === '__rp') { target[prop] = value; return true; }
+        if (prop === '__rp' || prop === '__itemKey') { target[prop] = value; return true; }
         const old = target[prop];
         target[prop] = value;
-        if (old !== value) onMutate();
+        if (old !== value) _reactive.notify(key);
         return true;
       },
       get(target, prop) {
         if (prop === '__rp') return true;
+        if (prop === '__itemKey') return key;
+        _reactive.record(key);
         return target[prop];
       }
     });
+
+    _proxyCache.set(item, proxy);
+    return proxy;
   }
 
   /**
@@ -519,36 +611,80 @@ const Sandbox = (() => {
    * Reactively re-renders when:
    *   - The array reference changes (tracked via reactive deps on the getter)
    *   - An item's property is reassigned (detected via shallow proxy on each item)
+   *
+   * Nodes are inserted directly into the parent without any wrapper element.
+   * The parent and insertion reference are set later by _c when this result
+   * is appended as a child.
    */
   function _l(array, renderFn) {
     const getArray = typeof array === 'function' ? array : () => array;
 
     const { value: arr, deps } = _reactive.track(getArray);
 
-    const container = document.createElement('div');
-    container.style.display = 'contents';
+    const state = { nodes: [], parent: null, ref: null, itemKeys: new Set() };
+
+    function insertAfterRef(frag) {
+      if (!state.parent) return;
+      if (state.ref && state.ref.parentNode === state.parent) {
+        state.parent.insertBefore(frag, state.ref.nextSibling);
+      } else {
+        state.parent.insertBefore(frag, state.parent.firstChild);
+      }
+    }
+
+    function mount(parent, ref) {
+      state.parent = parent;
+      state.ref = ref;
+      if (state.nodes.length > 0) {
+        const frag = document.createDocumentFragment();
+        state.nodes.forEach(n => frag.appendChild(n));
+        insertAfterRef(frag);
+      }
+    }
+
+    function clearNodes() {
+      for (const n of state.nodes) {
+        if (n.parentNode) n.parentNode.removeChild(n);
+      }
+      state.nodes.length = 0;
+    }
 
     function renderItems(items) {
-      while (container.firstChild) container.removeChild(container.firstChild);
+      for (const k of state.itemKeys) _reactive.removeKey(k);
+      state.itemKeys.clear();
+
+      clearNodes();
       if (!items || !Array.isArray(items)) return;
 
+      const frag = document.createDocumentFragment();
       items.forEach((item, idx) => {
         try {
           const reactiveItem = (item !== null && typeof item === 'object')
-            ? _proxyItem(item, () => renderItems(getArray()))
+            ? _proxyItem(item)
             : item;
+          if (typeof reactiveItem === 'object' && reactiveItem !== null && reactiveItem.__itemKey) {
+            state.itemKeys.add(reactiveItem.__itemKey);
+          }
           const node = renderFn(reactiveItem, idx);
           if (node !== null && node !== undefined) {
             if (node instanceof Node) {
-              container.appendChild(node);
+              frag.appendChild(node);
+              state.nodes.push(node);
             } else if (typeof node === 'string' || typeof node === 'number') {
-              container.appendChild(document.createTextNode(String(node)));
+              const textNode = document.createTextNode(String(node));
+              frag.appendChild(textNode);
+              state.nodes.push(textNode);
             }
           }
         } catch (e) {
           console.error('[Sandbox] _l item render error:', e);
         }
       });
+
+      insertAfterRef(frag);
+      if (state.nodes.length > 0) {
+        state.ref = state.nodes[state.nodes.length - 1];
+      }
     }
 
     renderItems(arr);
@@ -558,7 +694,7 @@ const Sandbox = (() => {
       _reactive.addCleanup(unsub);
     }
 
-    return container;
+    return { _l: true, state, mount };
   }
 
   function _wrapReactive(obj, notifyKey) {
@@ -571,7 +707,11 @@ const Sandbox = (() => {
         if (prop === '__rp') return true;
         if (prop === '__rpProxy') return proxy;
         _reactive.record(notifyKey);
-        return target[prop];
+        const val = target[prop];
+        if (Array.isArray(target) && typeof prop === 'string' && /^\d+$/.test(prop) && val !== null && typeof val === 'object') {
+          return _proxyItem(val);
+        }
+        return val;
       },
       set(target, prop, value) {
         if (prop === '__rp' || prop === '__rpProxy') { target[prop] = value; return true; }
@@ -640,7 +780,13 @@ const Sandbox = (() => {
       if (!vm._renderFn) return document.createElement('div');
       _lastViewModel = vm;
       try {
-        return vm._renderFn.call(vm.data);
+        const result = vm._renderFn.call(vm.data);
+        if (result && result._l) {
+          const frag = document.createDocumentFragment();
+          result.state.nodes.forEach(n => frag.appendChild(n));
+          return frag;
+        }
+        return result;
       } catch (e) {
         console.error('[ViewModel] render error:', e);
         return document.createElement('div');

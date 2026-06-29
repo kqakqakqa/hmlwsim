@@ -20,6 +20,7 @@ const App = (() => {
     setupLocalSelectAll();
     setupInvertScroll();
     setupResetButton();
+    setupScreenshot();
     log('Simulator ready. Drag a .app file onto the watch or use quick load.', 'info');
   }
 
@@ -139,6 +140,40 @@ const App = (() => {
     }
   }
 
+  function setupScreenshot() {
+    const btn = document.getElementById('screenshot-btn');
+    if (btn) {
+      btn.addEventListener('click', takeScreenshot);
+    }
+  }
+
+  function takeScreenshot() {
+    const watchFrame = document.getElementById('watch-frame');
+    if (!watchFrame) {
+      log('Nothing to capture.', 'warn');
+      return;
+    }
+    if (typeof html2canvas === 'undefined') {
+      log('html2canvas not loaded.', 'error');
+      return;
+    }
+
+    html2canvas(watchFrame, {
+      scale: 2,
+      backgroundColor: null,
+      useCORS: true,
+      logging: false,
+    }).then(canvas => {
+      const link = document.createElement('a');
+      link.download = 'screenshot_' + Date.now() + '.png';
+      link.href = canvas.toDataURL('image/png');
+      link.click();
+      log('Screenshot saved.', 'info');
+    }).catch(err => {
+      log('Screenshot failed: ' + err.message, 'error');
+    });
+  }
+
   function resetApp() {
     const appData = _appData;
     if (!appData) {
@@ -200,57 +235,82 @@ const App = (() => {
   }
 
   function setupImageResolver(appData) {
+    function makeBlobUrl(data, mimeType) {
+      const blob = data instanceof ArrayBuffer
+        ? new Blob([data], { type: mimeType })
+        : new Blob([data], { type: mimeType });
+      return URL.createObjectURL(blob);
+    }
+
+    function guessMimeType(ext) {
+      ext = (ext || '').toLowerCase();
+      if (ext === 'jpg' || ext === 'jpeg') return 'image/jpeg';
+      if (ext === 'bmp') return 'image/bmp';
+      if (ext === 'gif') return 'image/gif';
+      if (ext === 'webp') return 'image/webp';
+      return 'image/png';
+    }
+
+    function tryParseBin(data) {
+      if (!data || data.byteLength <= 0) return null;
+      const ab = data instanceof ArrayBuffer ? data : data.buffer;
+      return parseBinImage(ab);
+    }
+
+    function tryData(data, ext) {
+      if (!data) return null;
+      return tryParseBin(data) || makeBlobUrl(data, guessMimeType(ext));
+    }
+
+    function findSameBase(store, dir, baseName, preferredKey) {
+      const candidates = [];
+      for (const key of Object.keys(store)) {
+        if (dir && !key.startsWith(dir)) continue;
+        const fileName = dir ? key.substring(dir.length) : key;
+        const nameNoExt = fileName.replace(/\.[^.]+$/, '');
+        if (nameNoExt === baseName) candidates.push(key);
+      }
+      const preferred = candidates.find(k => k === preferredKey);
+      return preferred || candidates[0] || null;
+    }
+
+    function splitPath(normalized) {
+      const extMatch = normalized.match(/\.(\w+)$/);
+      const ext = extMatch ? extMatch[1].toLowerCase() : '';
+      const base = extMatch ? normalized.substring(0, normalized.length - extMatch[0].length) : normalized;
+      const slashIdx = base.lastIndexOf('/');
+      const dir = slashIdx >= 0 ? base.substring(0, slashIdx + 1) : '';
+      const baseName = slashIdx >= 0 ? base.substring(slashIdx + 1) : base;
+      return { ext, dir, baseName, base };
+    }
+
     const imageResolver = (src) => {
       const normalized = src.replace(/^\//, '');
+      const { ext, dir, baseName, base } = splitPath(normalized);
 
-      // Try 1: exact match in modules
+      // Modules: exact match first, then same base name (prefer same ext)
       let data = appData.modules[normalized];
-      if (data) {
-        const ext = (normalized.match(/\.(\w+)$/) || [])[1] || 'png';
-        const mimeType = ext === 'jpg' || ext === 'jpeg' ? 'image/jpeg' : ext === 'bmp' ? 'image/bmp' : 'image/png';
-        const blob = data instanceof ArrayBuffer
-          ? new Blob([data], { type: mimeType })
-          : new Blob([data], { type: mimeType });
-        return URL.createObjectURL(blob);
+      if (data) return tryData(data, ext);
+
+      const modKey = findSameBase(appData.modules, dir, baseName, normalized);
+      if (modKey) {
+        data = appData.modules[modKey];
+        if (data) return tryData(data, modKey.match(/\.(\w+)$/)?.[1]);
       }
 
-      // Try 2: .bin → .png/.jpg/.bmp
-      if (normalized.match(/\.bin$/i)) {
-        const basePath = normalized.replace(/\.bin$/i, '');
-        const extensions = ['.png', '.jpg', '.jpeg', '.bmp'];
-        for (const ext of extensions) {
-          const imgPath = basePath + ext;
-          data = appData.modules[imgPath];
-          if (data) {
-            const mimeType = ext === '.jpg' || ext === '.jpeg' ? 'image/jpeg' : ext === '.bmp' ? 'image/bmp' : 'image/png';
-            const blob = data instanceof ArrayBuffer
-              ? new Blob([data], { type: mimeType })
-              : new Blob([data], { type: mimeType });
-            return URL.createObjectURL(blob);
-          }
-        }
-
-        // Try 2b: parse .bin directly (Huawei ace-loader lite-image2bin format)
-        data = appData.modules[normalized];
-        if (data && data.byteLength > 0) {
-          const ab = data instanceof ArrayBuffer ? data : data.buffer;
-          const parsed = parseBinImage(ab);
-          if (parsed) return parsed;
-        }
-      }
-
-      // Try 3: try matching with resources/ prefix
+      // Resources: try each prefix, exact match then same base name
+      const noCommon = normalized.replace(/^common\//, '');
       const resourcePaths = ['base/media/', 'rawfile/'];
       for (const prefix of resourcePaths) {
-        const resourceKey = prefix + normalized.replace(/^common\//, '');
-        data = appData.resources?.[resourceKey];
-        if (data) {
-          const ext = (normalized.match(/\.(\w+)$/) || [])[1] || 'png';
-          const mimeType = ext === 'jpg' || ext === 'jpeg' ? 'image/jpeg' : ext === 'bmp' ? 'image/bmp' : 'image/png';
-          const blob = data instanceof ArrayBuffer
-            ? new Blob([data], { type: mimeType })
-            : new Blob([data], { type: mimeType });
-          return URL.createObjectURL(blob);
+        const resExact = prefix + noCommon;
+        data = appData.resources?.[resExact];
+        if (data) return makeBlobUrl(data, guessMimeType(ext));
+
+        const resPreferred = prefix + noCommon;
+        const resKey = findSameBase(appData.resources, prefix, baseName, resPreferred);
+        if (resKey) {
+          data = appData.resources[resKey];
+          if (data) return makeBlobUrl(data, guessMimeType(resKey.match(/\.(\w+)$/)?.[1]));
         }
       }
 
