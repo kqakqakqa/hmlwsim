@@ -63,6 +63,23 @@ text {
   display: inline;
   white-space: pre-wrap;
 }
+[data-simulator-marquee="true"] {
+  display: block;
+  overflow: hidden;
+  white-space: nowrap;
+}
+[data-simulator-marquee="true"] > .marquee-content {
+  display: inline-block;
+  min-width: 100%;
+  white-space: nowrap;
+  animation: simulator-marquee-scroll 5s ease-in-out infinite;
+  animation-play-state: paused;
+}
+@keyframes simulator-marquee-scroll {
+  0%, 10% { transform: translateX(0); }
+  45%, 55% { transform: translateX(var(--marquee-translation, 0px)); }
+  90%, 100% { transform: translateX(0); }
+}
 img, image {
   object-fit: contain;
   display: block;

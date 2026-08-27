@@ -45,13 +45,15 @@ const Unpacker = (() => {
       modules: {},
       resources: {},
       rawfiles: {},
-      hapFiles: Object.keys(hapZip.files),
+      hapFiles: {},
     };
 
     // Extract files from HAP
     for (const [path, file] of Object.entries(hapZip.files)) {
       if (file.dir) continue;
-      const content = await file.async('arraybuffer');
+
+      // Store ALL HAP files as ArrayBuffer
+      result.hapFiles[path] = await file.async('arraybuffer');
 
       if (path === 'config.json') {
         const text = await file.async('text');
@@ -90,11 +92,24 @@ const Unpacker = (() => {
           } else if (relPath.endsWith('.css')) {
             result.modules[relPath] = await file.async('text');
           } else if (relPath.startsWith('common/')) {
-            result.modules[relPath] = content;
+            // For common files, store the content that was already read
+            if (result.hapFiles[path] instanceof ArrayBuffer) {
+              result.modules[relPath] = result.hapFiles[path];
+            } else {
+              result.modules[relPath] = await file.async('text');
+            }
           }
         } else if (path.startsWith('assets/entry/resources/')) {
           const relativePath = path.replace('assets/entry/resources/', '');
-          result.resources[relativePath] = content;
+          // For resources, store the content that was already read
+          if (result.hapFiles[path] instanceof ArrayBuffer) {
+            result.resources[relativePath] = result.hapFiles[path];
+          } else if (typeof result.hapFiles[path] === 'string') {
+            // Base64 encoded binary
+            result.resources[relativePath] = result.hapFiles[path];
+          } else {
+            result.resources[relativePath] = await file.async('arraybuffer');
+          }
         }
       }
     }

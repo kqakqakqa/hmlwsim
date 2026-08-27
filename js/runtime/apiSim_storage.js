@@ -15,9 +15,10 @@ const ApiSimStorage = (() => {
   }
 
   function set(params) {
-    DeviceFeatureVirtualFS.writeText(KV_PREFIX + params.key, params.value, false, {
-      success: params.success,
-      complete: params.complete,
+    var callbacks = params || {};
+    DeviceFeatureVirtualFS.writeText(KV_PREFIX + callbacks.key, callbacks.value, false, {
+      success: callbacks.success,
+      complete: callbacks.complete,
     });
   }
 

@@ -1,8 +1,8 @@
 /**
- * JS Sandbox - Executes app JavaScript in an isolated context
- * Handles HarmonyOS compiled bundles with _c() virtual DOM and ViewModel
+ * JS Sandbox - Factory pattern. Each create() returns a fresh instance.
+ * Old instances are destroyed (timers cancelled, state cleared, DOM disconnected).
  */
-const Sandbox = (() => {
+function createSandbox() {
   let _imports = {};
   let _appExports = null;
   let _moduleCache = new Map();
@@ -10,8 +10,10 @@ const Sandbox = (() => {
   let _lastViewModel = null;
   let _lastError = null;
   let _imageSrcResolver = null;
+  const _activeTimers = new Set();
+  const _globalKeys = [];
+  let _destroyed = false;
 
-  // Reactive dependency tracking system
   const _reactive = {
     _currentDeps: null,
     _subscriptions: new Map(),
@@ -20,20 +22,12 @@ const Sandbox = (() => {
     track(fn) {
       this._currentDeps = new Set();
       let value;
-      try {
-        value = fn();
-      } catch (e) {
-        console.error('[Reactive] track error:', e);
-      }
+      try { value = fn(); } catch (e) { console.error('[Reactive] track error:', e); }
       const deps = this._currentDeps;
       this._currentDeps = null;
       return { value, deps };
     },
-
-    record(key) {
-      if (this._currentDeps) this._currentDeps.add(key);
-    },
-
+    record(key) { if (this._currentDeps) this._currentDeps.add(key); },
     subscribe(deps, callback) {
       const keys = [];
       for (const key of deps) {
@@ -41,44 +35,50 @@ const Sandbox = (() => {
         this._subscriptions.get(key).add(callback);
         keys.push(key);
       }
-      return () => {
-        for (const key of keys) {
-          const subs = this._subscriptions.get(key);
-          if (subs) subs.delete(callback);
-        }
-      };
+      return () => { for (const key of keys) { const s = this._subscriptions.get(key); if (s) s.delete(callback); } };
     },
-
-    notify(key) {
-      const subs = this._subscriptions.get(key);
-      if (subs) subs.forEach(cb => cb());
-    },
-
-    removeKey(key) {
-      this._subscriptions.delete(key);
-    },
-
-    addCleanup(fn) {
-      this._cleanupFns.push(fn);
-    },
-
-    cleanup() {
-      this._cleanupFns.forEach(fn => fn());
-      this._cleanupFns.length = 0;
-      this._subscriptions.clear();
-    }
+    notify(key) { const s = this._subscriptions.get(key); if (s) s.forEach(cb => cb()); },
+    removeKey(key) { this._subscriptions.delete(key); },
+    addCleanup(fn) { this._cleanupFns.push(fn); },
+    cleanup() { this._cleanupFns.forEach(fn => fn()); this._cleanupFns.length = 0; this._subscriptions.clear(); }
   };
 
-  function setOnAppTerminate(cb) { _onAppTerminate = cb; }
+  function _cancelAllTimers() {
+    for (const id of _activeTimers) {
+      window.clearTimeout(id);
+      window.clearInterval(id);
+    }
+    _activeTimers.clear();
+  }
 
+  function cleanupGlobals() {
+    for (const key of _globalKeys) {
+      try { delete window[key]; } catch (_) { }
+    }
+    _globalKeys.length = 0;
+  }
+
+  function cleanupReactive() { _reactive.cleanup(); }
+
+  function destroy() {
+    _destroyed = true;
+    _cancelAllTimers();
+    cleanupGlobals();
+    cleanupReactive();
+    _imports = {};
+    _appExports = null;
+    _moduleCache.clear();
+    _onAppTerminate = null;
+    _lastViewModel = null;
+    _lastError = null;
+    _imageSrcResolver = null;
+  }
+
+  function setOnAppTerminate(cb) { _onAppTerminate = cb; }
   function setImageSrcResolver(resolver) { _imageSrcResolver = resolver; }
 
   function _resolveImageSrc(src) {
-    // Check if the src can be resolved to an image file from app modules
-    // (handles both .bin from compiled apps and .png/.jpg/.bmp from unsigned apps)
-    if (typeof src === 'string' && _imageSrcResolver) {
-      return _imageSrcResolver(src);
-    }
+    if (typeof src === 'string' && _imageSrcResolver) return _imageSrcResolver(src);
     return src;
   }
 
@@ -89,6 +89,10 @@ const Sandbox = (() => {
       el.style.display = val ? '' : 'none';
     } else if (tag === 'text' && key === 'value') {
       el.textContent = String(val);
+    } else if (tag === 'marquee' && key === 'value') {
+      if (el._marqueeContent) el._marqueeContent.textContent = String(val);
+      else el.textContent = String(val);
+      _updateMarquee(el);
     } else if (tag === 'image' && key === 'src') {
       el.setAttribute('src', _resolveImageSrc(String(val)));
     } else if (tag === 'swiper' && key === 'index') {
@@ -97,28 +101,17 @@ const Sandbox = (() => {
       if (!isNaN(idx)) {
         const isVertical = el.getAttribute('vertical') === 'true';
         requestAnimationFrame(() => {
-          if (isVertical) {
-            el.scrollTo({ top: idx * el.clientHeight, behavior: 'smooth' });
-          } else {
-            el.scrollTo({ left: idx * el.clientWidth, behavior: 'smooth' });
-          }
+          if (isVertical) el.scrollTo({ top: idx * el.clientHeight, behavior: 'smooth' });
+          else el.scrollTo({ left: idx * el.clientWidth, behavior: 'smooth' });
         });
       }
     } else if (tag === 'progress') {
-      if (key === 'type') {
-        el.setAttribute('type', String(val));
-      } else if (key === 'percent' || key === 'value') {
-        el.setAttribute('value', String(val));
-        el.setAttribute('max', '100');
-      }
+      if (key === 'type') el.setAttribute('type', String(val));
+      else if (key === 'percent' || key === 'value') { el.setAttribute('value', String(val)); el.setAttribute('max', '100'); }
     } else if (tag === 'input') {
-      if (key === 'type') {
-        el.setAttribute('type', String(val));
-      } else if (key === 'checked') {
-        el.checked = !!val;
-      } else {
-        el.setAttribute(key, String(val));
-      }
+      if (key === 'type') el.setAttribute('type', String(val));
+      else if (key === 'checked') el.checked = !!val;
+      else el.setAttribute(key, String(val));
     } else {
       el.setAttribute(key, String(val));
     }
@@ -235,9 +228,7 @@ const Sandbox = (() => {
         return '#' + rr + gg + bb + aa;
       }
       const match6 = val.match(/^#([0-9a-fA-F]{6})$/);
-      if (match6) {
-        return val;
-      }
+      if (match6) return val;
     }
     return val;
   }
@@ -254,446 +245,212 @@ const Sandbox = (() => {
 
   function buildBoxShadow(val) {
     if (!val || !Array.isArray(val)) return '';
-    const parts = val.map(p => {
+    return val.map(p => {
       if (!p) return '';
       if (typeof p === 'object' && p.type) {
         if (p.type === 'Color') return formatColor(p.value);
         return p.value;
       }
       return p;
-    }).filter(Boolean);
-    return parts.join(' ');
+    }).filter(Boolean).join(' ');
   }
 
   function applyStyles(el, styles) {
     if (!styles) return;
     for (const [key, val] of Object.entries(styles)) {
-      if (key === 'boxShadow') {
-        el.style['box-shadow'] = buildBoxShadow(val);
-        continue;
-      }
-      if (key === 'boxShadowH' || key === 'boxShadowV' || key === 'boxShadowBlur' || key === 'boxShadowSpread' || key === 'boxShadowColor') {
-        continue;
-      }
-      const cssProp = STYLE_PROP_MAP[key] || key;
-      el.style[cssProp] = formatStyleValue(key, val);
+      if (key === 'boxShadow') { el.style['box-shadow'] = buildBoxShadow(val); continue; }
+      if (key === 'boxShadowH' || key === 'boxShadowV' || key === 'boxShadowBlur' || key === 'boxShadowSpread' || key === 'boxShadowColor') continue;
+      el.style[STYLE_PROP_MAP[key] || key] = formatStyleValue(key, val);
     }
   }
 
-  /**
-   * HarmonyOS _c() - virtual DOM createElement
-   * _c(tag, props, children) → DOM Element
-   */
+  function _updateMarquee(el) {
+    const content = el._marqueeContent;
+    if (!content) return;
+    requestAnimationFrame(() => {
+      const distance = Math.max(0, content.scrollWidth - el.clientWidth);
+      el.style.setProperty('--marquee-translation', -distance + 'px');
+      content.style.animationPlayState = distance > 0 ? 'running' : 'paused';
+    });
+  }
+
   function _c(tag, props, children) {
     props = props || {};
     children = children || [];
-
-    const htmlTag = tag === 'image' ? 'img' : tag;
+    const htmlTag = tag === 'image' ? 'img' : (tag === 'marquee' ? 'div' : tag);
     const el = document.createElement(htmlTag);
     if (tag === 'image') el.setAttribute('draggable', 'false');
+    if (tag === 'marquee') {
+      el.setAttribute('data-simulator-marquee', 'true');
+      const content = document.createElement('span');
+      content.className = 'marquee-content';
+      el._marqueeContent = content;
+      el.appendChild(content);
+    }
 
-    // Apply static inline styles
     if (props.staticStyle) applyStyles(el, props.staticStyle);
 
-    // Apply dynamic styles with reactive tracking
     if (props.dynamicStyle) {
       for (const [key, fn] of Object.entries(props.dynamicStyle)) {
         if (typeof fn === 'function') {
           const { value: val, deps } = _reactive.track(fn);
           const cssProp = STYLE_PROP_MAP[key] || key;
-          if (val !== undefined && val !== null) {
-            el.style[cssProp] = formatStyleValue(key, val);
-          } else {
-            // Style function failed on first call (e.g. data not ready yet).
-            // Schedule a deferred retry so it can pick up values that were set
-            // outside of the ViewModel's reactive Proxy (e.g. uiSizes.init()).
-            requestAnimationFrame(() => {
-              try {
-                const retryVal = fn();
-                if (retryVal !== undefined && retryVal !== null) {
-                  el.style[cssProp] = formatStyleValue(key, retryVal);
-                }
-              } catch (_) { }
-            });
-          }
+          if (val !== undefined && val !== null) el.style[cssProp] = formatStyleValue(key, val);
+          else requestAnimationFrame(() => { try { const v = fn(); if (v !== undefined && v !== null) el.style[cssProp] = formatStyleValue(key, v); } catch (_) { } });
           if (deps.size > 0) {
-            const unsub = _reactive.subscribe(deps, () => {
-              try {
-                const newVal = fn();
-                if (newVal !== undefined && newVal !== null) {
-                  el.style[cssProp] = formatStyleValue(key, newVal);
-                }
-              } catch (e) {
-                console.warn('[DynamicStyle] update error for', tag, key, e);
-              }
-            });
-            _reactive.addCleanup(unsub);
+            _reactive.addCleanup(_reactive.subscribe(deps, () => { try { const v = fn(); if (v !== undefined && v !== null) el.style[cssProp] = formatStyleValue(key, v); } catch (e) { } }));
           }
         } else {
-          const cssProp = STYLE_PROP_MAP[key] || fn;
-          el.style[cssProp] = formatStyleValue(key, fn);
+          el.style[STYLE_PROP_MAP[key] || fn] = formatStyleValue(key, fn);
         }
       }
     }
 
-    // Apply static CSS classes
-    if (props.staticClass && Array.isArray(props.staticClass)) {
-      props.staticClass.forEach(cls => el.classList.add(cls));
-    } else if (typeof props.staticClass === 'string' && props.staticClass) {
-      props.staticClass.split(/\s+/).filter(Boolean).forEach(cls => el.classList.add(cls));
-    }
+    if (props.staticClass && Array.isArray(props.staticClass)) props.staticClass.forEach(cls => el.classList.add(cls));
+    else if (typeof props.staticClass === 'string' && props.staticClass) props.staticClass.split(/\s+/).filter(Boolean).forEach(cls => el.classList.add(cls));
 
-    // Apply dynamic CSS classes with reactive tracking
     if (props.dynamicClass) {
       const fn = props.dynamicClass;
       if (typeof fn === 'function') {
         const { value: clsResult, deps } = _reactive.track(fn);
-        if (typeof clsResult === 'string' && clsResult) {
-          clsResult.split(/\s+/).filter(Boolean).forEach(cls => el.classList.add(cls));
-        } else if (typeof clsResult === 'object' && clsResult !== null) {
-          for (const [cls, flag] of Object.entries(clsResult)) {
-            if (flag) el.classList.add(cls);
-          }
-        }
+        if (typeof clsResult === 'string' && clsResult) clsResult.split(/\s+/).filter(Boolean).forEach(cls => el.classList.add(cls));
+        else if (typeof clsResult === 'object' && clsResult !== null) for (const [cls, flag] of Object.entries(clsResult)) { if (flag) el.classList.add(cls); }
         if (deps.size > 0) {
-          const unsub = _reactive.subscribe(deps, () => {
-            const oldClasses = el.className;
+          _reactive.addCleanup(_reactive.subscribe(deps, () => {
             el.className = '';
-            if (props.staticClass) {
-              if (Array.isArray(props.staticClass)) {
-                props.staticClass.forEach(cls => el.classList.add(cls));
-              } else {
-                props.staticClass.split(/\s+/).filter(Boolean).forEach(cls => el.classList.add(cls));
-              }
-            }
-            const newResult = fn();
-            if (typeof newResult === 'string' && newResult) {
-              newResult.split(/\s+/).filter(Boolean).forEach(cls => el.classList.add(cls));
-            } else if (typeof newResult === 'object' && newResult !== null) {
-              for (const [cls, flag] of Object.entries(newResult)) {
-                if (flag) el.classList.add(cls);
-              }
-            }
-          });
-          _reactive.addCleanup(unsub);
-        }
-      } else {
-        if (typeof clsResult === 'string' && clsResult) {
-          clsResult.split(/\s+/).filter(Boolean).forEach(cls => el.classList.add(cls));
-        } else if (typeof clsResult === 'object' && clsResult !== null) {
-          for (const [cls, flag] of Object.entries(clsResult)) {
-            if (flag) el.classList.add(cls);
-          }
+            if (props.staticClass) { if (Array.isArray(props.staticClass)) props.staticClass.forEach(cls => el.classList.add(cls)); else props.staticClass.split(/\s+/).filter(Boolean).forEach(cls => el.classList.add(cls)); }
+            const r = fn();
+            if (typeof r === 'string' && r) r.split(/\s+/).filter(Boolean).forEach(cls => el.classList.add(cls));
+            else if (typeof r === 'object' && r !== null) for (const [c, f] of Object.entries(r)) { if (f) el.classList.add(c); }
+          }));
         }
       }
     }
 
-    // Apply attributes with reactive tracking
     if (props.attrs) {
       for (const [key, val] of Object.entries(props.attrs)) {
         if (typeof val === 'function') {
           const { value: resolved, deps } = _reactive.track(val);
           _updateAttr(el, tag, key, resolved);
-          if (deps.size > 0 && key !== 'ref') {
-            const unsub = _reactive.subscribe(deps, () => {
-              const newVal = val();
-              _updateAttr(el, tag, key, newVal);
-            });
-            _reactive.addCleanup(unsub);
-          }
+          if (deps.size > 0 && key !== 'ref') _reactive.addCleanup(_reactive.subscribe(deps, () => _updateAttr(el, tag, key, val())));
         } else {
           _updateAttr(el, tag, key, val);
         }
       }
     }
 
-    // Apply events from onBubbleEvents
-    if (props.onBubbleEvents) {
-      for (const [event, handler] of Object.entries(props.onBubbleEvents)) {
+    function bindEvent(obj, eventKey, phase) {
+      if (!obj) return;
+      for (const [event, handler] of Object.entries(obj)) {
         if (typeof handler === 'function') {
           el.addEventListener(event, (e) => {
+            if (phase === 'stop' || phase === 'captureStop') e.stopPropagation();
             handler.call(_lastViewModel ? _lastViewModel._data : {}, e);
-          });
+          }, phase === 'capture' || phase === 'captureStop');
         }
       }
     }
+    bindEvent(props.onBubbleEvents, null, null);
+    bindEvent(props.on, null, null);
+    bindEvent(props.catchBubbleEvents, null, 'stop');
+    bindEvent(props.onCaptureEvents, null, 'capture');
+    bindEvent(props.catchCaptureEvents, null, 'captureStop');
 
-    // Apply events from on:{event} attributes
-    if (props.on) {
-      for (const [event, handler] of Object.entries(props.on)) {
-        if (typeof handler === 'function') {
-          el.addEventListener(event, (e) => {
-            handler.call(_lastViewModel ? _lastViewModel._data : {}, e);
-          });
-        }
-      }
-    }
-
-    // catchBubbleEvents - stopPropagation
-    if (props.catchBubbleEvents) {
-      for (const [event, handler] of Object.entries(props.catchBubbleEvents)) {
-        if (typeof handler === 'function') {
-          el.addEventListener(event, (e) => {
-            e.stopPropagation();
-            handler.call(_lastViewModel ? _lastViewModel._data : {}, e);
-          });
-        }
-      }
-    }
-
-    // onCaptureEvents - capture phase
-    if (props.onCaptureEvents) {
-      for (const [event, handler] of Object.entries(props.onCaptureEvents)) {
-        if (typeof handler === 'function') {
-          el.addEventListener(event, (e) => {
-            handler.call(_lastViewModel ? _lastViewModel._data : {}, e);
-          }, true);
-        }
-      }
-    }
-
-    // catchCaptureEvents - capture phase + stopPropagation
-    if (props.catchCaptureEvents) {
-      for (const [event, handler] of Object.entries(props.catchCaptureEvents)) {
-        if (typeof handler === 'function') {
-          el.addEventListener(event, (e) => {
-            e.stopPropagation();
-            handler.call(_lastViewModel ? _lastViewModel._data : {}, e);
-          }, true);
-        }
-      }
-    }
-
-    // Append children
+    const childContainer = tag === 'marquee' ? el._marqueeContent : el;
     if (Array.isArray(children)) {
       let lastSibling = null;
       children.forEach(child => {
         if (child === null || child === undefined) return;
-        if (child && child._l) {
-          child.mount(el, lastSibling);
-          if (child.state.nodes.length > 0) {
-            lastSibling = child.state.nodes[child.state.nodes.length - 1];
-          }
-        } else if (typeof child === 'string' || typeof child === 'number') {
-          const t = document.createTextNode(String(child));
-          el.appendChild(t);
-          lastSibling = t;
-        } else if (child instanceof Node) {
-          el.appendChild(child);
-          lastSibling = child;
-        }
+        if (child && child._l) { child.mount(childContainer, lastSibling); if (child.state.nodes.length > 0) lastSibling = child.state.nodes[child.state.nodes.length - 1]; }
+        else if (typeof child === 'string' || typeof child === 'number') { const t = document.createTextNode(String(child)); childContainer.appendChild(t); lastSibling = t; }
+        else if (child instanceof Node) { childContainer.appendChild(child); lastSibling = child; }
       });
     }
-
+    if (tag === 'marquee') _updateMarquee(el);
     return el;
   }
 
-  /**
-   * _i(condition, renderFn) - Conditional rendering (if/elif/else/show)
-   * ace-loader compiles if/elif/else/show to _i() calls
-   * Now supports reactive re-rendering when condition dependencies change.
-   */
   function _i(condition, renderFn) {
     const getCondition = typeof condition === 'function' ? condition : () => condition;
-
     const { value: initialVal, deps } = _reactive.track(getCondition);
-
     const state = { nodes: [], parent: null, ref: null };
 
-    function clearNodes() {
-      for (const n of state.nodes) {
-        if (n.parentNode) n.parentNode.removeChild(n);
-      }
-      state.nodes.length = 0;
-    }
-
-    function renderContent() {
-      clearNodes();
-      try {
-        const node = renderFn();
-        if (node !== null && node !== undefined) {
-          if (node instanceof Node) {
-            state.nodes.push(node);
-          } else if (typeof node === 'string' || typeof node === 'number') {
-            state.nodes.push(document.createTextNode(String(node)));
-          }
-        }
-      } catch (e) {
-        console.error('[Sandbox] _i render error:', e);
-      }
-      insertNodes();
-    }
-
+    function clearNodes() { for (const n of state.nodes) { if (n.parentNode) n.parentNode.removeChild(n); } state.nodes.length = 0; }
     function insertNodes() {
       if (!state.parent || state.nodes.length === 0) return;
       const frag = document.createDocumentFragment();
       state.nodes.forEach(n => frag.appendChild(n));
-      if (state.ref && state.ref.parentNode === state.parent) {
-        state.parent.insertBefore(frag, state.ref.nextSibling);
-      } else {
-        state.parent.insertBefore(frag, state.parent.firstChild);
-      }
-      if (state.nodes.length > 0) {
-        state.ref = state.nodes[state.nodes.length - 1];
-      }
+      if (state.ref && state.ref.parentNode === state.parent) state.parent.insertBefore(frag, state.ref.nextSibling);
+      else state.parent.insertBefore(frag, state.parent.firstChild);
+      if (state.nodes.length > 0) state.ref = state.nodes[state.nodes.length - 1];
     }
-
-    function mount(parent, ref) {
-      state.parent = parent;
-      state.ref = ref;
-      if (state.nodes.length > 0) {
-        insertNodes();
-      }
+    function renderContent() {
+      clearNodes();
+      try { const node = renderFn(); if (node !== null && node !== undefined) { if (node instanceof Node) state.nodes.push(node); else if (typeof node === 'string' || typeof node === 'number') state.nodes.push(document.createTextNode(String(node))); } } catch (e) { console.error('[Sandbox] _i render error:', e); }
+      insertNodes();
     }
+    function mount(parent, ref) { state.parent = parent; state.ref = ref; if (state.nodes.length > 0) insertNodes(); }
 
-    if (initialVal) {
-      renderContent();
-    }
-
+    if (initialVal) renderContent();
     if (deps.size > 0) {
       let wasVisible = !!initialVal;
-      const unsub = _reactive.subscribe(deps, () => {
-        const newVal = !!getCondition();
-        if (newVal === wasVisible) return;
-        wasVisible = newVal;
-        if (newVal) {
-          renderContent();
-        } else {
-          clearNodes();
-        }
-      });
-      _reactive.addCleanup(unsub);
+      _reactive.addCleanup(_reactive.subscribe(deps, () => { const v = !!getCondition(); if (v === wasVisible) return; wasVisible = v; if (v) renderContent(); else clearNodes(); }));
     }
-
     return { _l: true, state, mount };
   }
 
-  /**
-   * Proxy an object so that property access/set goes through _reactive.
-   * Used by _l to detect item-level changes inside for loops.
-   */
   const _itemKeys = new WeakMap();
   let _itemKeySeq = 0;
   const _proxyCache = new WeakMap();
 
-  function _proxyItem(item, onMutate) {
+  function _proxyItem(item) {
     if (item === null || typeof item !== 'object') return item;
     if (_proxyCache.has(item)) return _proxyCache.get(item);
     if (item.__itemKey) return item;
-
     if (!_itemKeys.has(item)) _itemKeys.set(item, '_i' + (_itemKeySeq++));
     const key = _itemKeys.get(item);
-
     const proxy = new Proxy(item, {
-      set(target, prop, value) {
-        if (prop === '__rp' || prop === '__itemKey') { target[prop] = value; return true; }
-        const old = target[prop];
-        target[prop] = value;
-        if (old !== value) _reactive.notify(key);
-        return true;
-      },
-      get(target, prop) {
-        if (prop === '__rp') return true;
-        if (prop === '__itemKey') return key;
-        _reactive.record(key);
-        return target[prop];
-      }
+      set(target, prop, value) { if (prop === '__rp' || prop === '__itemKey') { target[prop] = value; return true; } const old = target[prop]; target[prop] = value; if (old !== value) _reactive.notify(key); return true; },
+      get(target, prop) { if (prop === '__rp') return true; if (prop === '__itemKey') return key; _reactive.record(key); return target[prop]; }
     });
-
     _proxyCache.set(item, proxy);
     return proxy;
   }
 
-  /**
-   * _l(array, renderFn) - List rendering (for) with reactive updates
-   * ace-loader compiles for="{{list}}" to _l(list, function(item, idx){ return _c(...) })
-   *
-   * Reactively re-renders when:
-   *   - The array reference changes (tracked via reactive deps on the getter)
-   *   - An item's property is reassigned (detected via shallow proxy on each item)
-   *
-   * Nodes are inserted directly into the parent without any wrapper element.
-   * The parent and insertion reference are set later by _c when this result
-   * is appended as a child.
-   */
   function _l(array, renderFn) {
     const getArray = typeof array === 'function' ? array : () => array;
-
     const { value: arr, deps } = _reactive.track(getArray);
-
     const state = { nodes: [], parent: null, ref: null, itemKeys: new Set() };
 
     function insertAfterRef(frag) {
       if (!state.parent) return;
-      if (state.ref && state.ref.parentNode === state.parent) {
-        state.parent.insertBefore(frag, state.ref.nextSibling);
-      } else {
-        state.parent.insertBefore(frag, state.parent.firstChild);
-      }
+      if (state.ref && state.ref.parentNode === state.parent) state.parent.insertBefore(frag, state.ref.nextSibling);
+      else state.parent.insertBefore(frag, state.parent.firstChild);
     }
-
-    function mount(parent, ref) {
-      state.parent = parent;
-      state.ref = ref;
-      if (state.nodes.length > 0) {
-        const frag = document.createDocumentFragment();
-        state.nodes.forEach(n => frag.appendChild(n));
-        insertAfterRef(frag);
-      }
-    }
-
-    function clearNodes() {
-      for (const n of state.nodes) {
-        if (n.parentNode) n.parentNode.removeChild(n);
-      }
-      state.nodes.length = 0;
-    }
-
+    function mount(parent, ref) { state.parent = parent; state.ref = ref; if (state.nodes.length > 0) { const frag = document.createDocumentFragment(); state.nodes.forEach(n => frag.appendChild(n)); insertAfterRef(frag); } }
+    function clearNodes() { for (const n of state.nodes) { if (n.parentNode) n.parentNode.removeChild(n); } state.nodes.length = 0; }
     function renderItems(items) {
       for (const k of state.itemKeys) _reactive.removeKey(k);
       state.itemKeys.clear();
-
       clearNodes();
       if (!items || !Array.isArray(items)) return;
-
       const frag = document.createDocumentFragment();
       items.forEach((item, idx) => {
         try {
-          const reactiveItem = (item !== null && typeof item === 'object')
-            ? _proxyItem(item)
-            : item;
-          if (typeof reactiveItem === 'object' && reactiveItem !== null && reactiveItem.__itemKey) {
-            state.itemKeys.add(reactiveItem.__itemKey);
-          }
+          const reactiveItem = (item !== null && typeof item === 'object') ? _proxyItem(item) : item;
+          if (typeof reactiveItem === 'object' && reactiveItem !== null && reactiveItem.__itemKey) state.itemKeys.add(reactiveItem.__itemKey);
           const node = renderFn(reactiveItem, idx);
           if (node !== null && node !== undefined) {
-            if (node instanceof Node) {
-              frag.appendChild(node);
-              state.nodes.push(node);
-            } else if (typeof node === 'string' || typeof node === 'number') {
-              const textNode = document.createTextNode(String(node));
-              frag.appendChild(textNode);
-              state.nodes.push(textNode);
-            }
+            if (node instanceof Node) { frag.appendChild(node); state.nodes.push(node); }
+            else if (typeof node === 'string' || typeof node === 'number') { const t = document.createTextNode(String(node)); frag.appendChild(t); state.nodes.push(t); }
           }
-        } catch (e) {
-          console.error('[Sandbox] _l item render error:', e);
-        }
+        } catch (e) { console.error('[Sandbox] _l item render error:', e); }
       });
-
       insertAfterRef(frag);
-      if (state.nodes.length > 0) {
-        state.ref = state.nodes[state.nodes.length - 1];
-      }
+      if (state.nodes.length > 0) state.ref = state.nodes[state.nodes.length - 1];
     }
-
     renderItems(arr);
-
-    if (deps.size > 0) {
-      const unsub = _reactive.subscribe(deps, () => renderItems(getArray()));
-      _reactive.addCleanup(unsub);
-    }
-
+    if (deps.size > 0) _reactive.addCleanup(_reactive.subscribe(deps, () => renderItems(getArray())));
     return { _l: true, state, mount };
   }
 
@@ -701,16 +458,13 @@ const Sandbox = (() => {
     if (obj === null || typeof obj !== 'object') return obj;
     if (obj.__rp) return obj;
     if (obj.__rpProxy) return obj.__rpProxy;
-
     const proxy = new Proxy(obj, {
       get(target, prop) {
         if (prop === '__rp') return true;
         if (prop === '__rpProxy') return proxy;
         _reactive.record(notifyKey);
         const val = target[prop];
-        if (Array.isArray(target) && typeof prop === 'string' && /^\d+$/.test(prop) && val !== null && typeof val === 'object') {
-          return _proxyItem(val);
-        }
+        if (Array.isArray(target) && typeof prop === 'string' && /^\d+$/.test(prop) && val !== null && typeof val === 'object') return _proxyItem(val);
         return val;
       },
       set(target, prop, value) {
@@ -720,59 +474,31 @@ const Sandbox = (() => {
         return true;
       }
     });
-
     Object.defineProperty(obj, '__rpProxy', { value: proxy, enumerable: false, configurable: true, writable: true });
     return proxy;
   }
 
-  /**
-   * ViewModel - wraps HarmonyOS component definitions
-   * Returns a callable function with all component properties attached
-   */
   function ViewModel(definition) {
     definition = definition || {};
     const data = definition.data || {};
     const renderFn = definition.render || null;
     const styleSheet = definition.styleSheet || null;
 
-    // The callable "instance" — HarmonyOS IIFE does `return r()` on the ViewModel result
     function vm() { return vm; }
     vm._data = data;
     vm._renderFn = renderFn;
     vm._styleSheet = styleSheet;
     vm._onUpdate = null;
     vm.data = new Proxy(data, {
-      get: (target, prop) => {
-        _reactive.record(prop);
-        const val = target[prop];
-        if (val !== null && typeof val === 'object' && !val.__rp) {
-          return _wrapReactive(val, prop);
-        }
-        return val;
-      },
-      set: (target, prop, value) => {
-        const old = target[prop];
-        if (value !== null && typeof value === 'object' && !value.__rp) {
-          value = _wrapReactive(value, prop);
-        }
-        target[prop] = value;
-        if (old !== value || Array.isArray(value)) {
-          _reactive.notify(prop);
-        }
-        return true;
-      }
+      get: (target, prop) => { _reactive.record(prop); const val = target[prop]; if (val !== null && typeof val === 'object' && !val.__rp) return _wrapReactive(val, prop); return val; },
+      set: (target, prop, value) => { const old = target[prop]; if (value !== null && typeof value === 'object' && !value.__rp) value = _wrapReactive(value, prop); target[prop] = value; if (old !== value || Array.isArray(value)) _reactive.notify(prop); return true; }
     });
     data.data = vm.data;
 
-    // Copy all methods and non-data properties
     for (const [key, val] of Object.entries(definition)) {
       if (key !== 'data' && key !== 'render' && key !== 'styleSheet') {
-        if (typeof val === 'function') {
-          vm[key] = val.bind(vm.data);
-          vm.data[key] = val.bind(vm.data);
-        } else {
-          vm[key] = val;
-        }
+        if (typeof val === 'function') { vm[key] = val.bind(vm.data); vm.data[key] = val.bind(vm.data); }
+        else vm[key] = val;
       }
     }
 
@@ -781,52 +507,34 @@ const Sandbox = (() => {
       _lastViewModel = vm;
       try {
         const result = vm._renderFn.call(vm.data);
-        if (result && result._l) {
-          const frag = document.createDocumentFragment();
-          result.state.nodes.forEach(n => frag.appendChild(n));
-          return frag;
-        }
+        if (result && result._l) { const frag = document.createDocumentFragment(); result.state.nodes.forEach(n => frag.appendChild(n)); return frag; }
         return result;
-      } catch (e) {
-        console.error('[ViewModel] render error:', e);
-        return document.createElement('div');
-      }
+      } catch (e) { console.error('[ViewModel] render error:', e); return document.createElement('div'); }
     };
 
     vm.getStyleSheet = function () {
       if (!styleSheet) return '';
       let css = '';
-
       const classSelectors = styleSheet.classSelectors || {};
       for (const [cls, styles] of Object.entries(classSelectors)) {
         css += `.${cls} { `;
         for (const [prop, val] of Object.entries(styles)) {
-          if (prop === 'boxShadow') {
-            css += `box-shadow: ${buildBoxShadow(val)}; `;
-            continue;
-          }
+          if (prop === 'boxShadow') { css += `box-shadow: ${buildBoxShadow(val)}; `; continue; }
           if (prop === 'boxShadowH' || prop === 'boxShadowV' || prop === 'boxShadowBlur' || prop === 'boxShadowSpread' || prop === 'boxShadowColor') continue;
-          const cssProp = STYLE_PROP_MAP[prop] || prop;
-          css += `${cssProp}: ${formatStyleValue(prop, val)}; `;
+          css += `${STYLE_PROP_MAP[prop] || prop}: ${formatStyleValue(prop, val)}; `;
         }
         css += '}\n';
       }
-
       const idSelectors = styleSheet.idSelectors || {};
       for (const [id, styles] of Object.entries(idSelectors)) {
         css += `#${id} { `;
         for (const [prop, val] of Object.entries(styles)) {
-          if (prop === 'boxShadow') {
-            css += `box-shadow: ${buildBoxShadow(val)}; `;
-            continue;
-          }
+          if (prop === 'boxShadow') { css += `box-shadow: ${buildBoxShadow(val)}; `; continue; }
           if (prop === 'boxShadowH' || prop === 'boxShadowV' || prop === 'boxShadowBlur' || prop === 'boxShadowSpread' || prop === 'boxShadowColor') continue;
-          const cssProp = STYLE_PROP_MAP[prop] || prop;
-          css += `${cssProp}: ${formatStyleValue(prop, val)}; `;
+          css += `${STYLE_PROP_MAP[prop] || prop}: ${formatStyleValue(prop, val)}; `;
         }
         css += '}\n';
       }
-
       const keyframes = styleSheet['@keyframes'] || {};
       for (const [name, steps] of Object.entries(keyframes)) {
         css += `@keyframes ${name} { `;
@@ -836,19 +544,14 @@ const Sandbox = (() => {
             css += `${time} { `;
             for (const [prop, val] of Object.entries(step)) {
               if (prop === 'time') continue;
-              if (prop === 'boxShadow') {
-                css += `box-shadow: ${buildBoxShadow(val)}; `;
-                continue;
-              }
-              const cssProp = STYLE_PROP_MAP[prop] || prop;
-              css += `${cssProp}: ${formatStyleValue(prop, val)}; `;
+              if (prop === 'boxShadow') { css += `box-shadow: ${buildBoxShadow(val)}; `; continue; }
+              css += `${STYLE_PROP_MAP[prop] || prop}: ${formatStyleValue(prop, val)}; `;
             }
             css += '} ';
           });
         }
         css += '}\n';
       }
-
       return css;
     };
 
@@ -856,8 +559,21 @@ const Sandbox = (() => {
     return vm;
   }
 
+  function _trackSetTimeout(fn, ms) {
+    const id = window.setTimeout(() => { _activeTimers.delete(id); if (_destroyed) return; fn(); }, ms);
+    _activeTimers.add(id);
+    return id;
+  }
+  function _trackSetInterval(fn, ms) {
+    const id = window.setInterval(() => { if (_destroyed) return; fn(); }, ms);
+    _activeTimers.add(id);
+    return id;
+  }
+  function _trackClearTimeout(id) { window.clearTimeout(id); _activeTimers.delete(id); }
+  function _trackClearInterval(id) { window.clearInterval(id); _activeTimers.delete(id); }
+
   function createContext(appData) {
-    const ctx = {
+    return {
       console: {
         log: (...args) => console.log('[App]', ...args),
         info: (...args) => console.log('[App:info]', ...args),
@@ -869,29 +585,23 @@ const Sandbox = (() => {
         return ApiRegistry.resolve(moduleName);
       },
       FeatureAbility: ApiSimWearengine,
-      _c: _c,
-      _i: _i,
-      _l: _l,
+      _c: _c, _i: _i, _l: _l,
       ViewModel: ViewModel,
-      setTimeout: window.setTimeout.bind(window),
-      setInterval: window.setInterval.bind(window),
-      clearTimeout: window.clearTimeout.bind(window),
-      clearInterval: window.clearInterval.bind(window),
+      setTimeout: _trackSetTimeout, setInterval: _trackSetInterval,
+      clearTimeout: _trackClearTimeout, clearInterval: _trackClearInterval,
       Promise: window.Promise,
       Math: window.Math, Date: window.Date, JSON: window.JSON,
       parseInt: window.parseInt, parseFloat: window.parseFloat, isNaN: window.isNaN,
-      encodeURI: window.encodeURI,
-      encodeURIComponent: window.encodeURIComponent,
-      decodeURI: window.decodeURI,
-      decodeURIComponent: window.decodeURIComponent,
+      encodeURI: window.encodeURI, encodeURIComponent: window.encodeURIComponent,
+      decodeURI: window.decodeURI, decodeURIComponent: window.decodeURIComponent,
       String: window.String, Number: window.Number, Boolean: window.Boolean,
       Array: window.Array, Object: window.Object, RegExp: window.RegExp,
       Error: window.Error,
     };
-    return ctx;
   }
 
   function resolveImportPath(fromPath, importPath) {
+    if (importPath.startsWith('@system.') || importPath.startsWith('system.')) return importPath;
     const fromParts = fromPath.split('/');
     fromParts.pop();
     for (const part of importPath.replace(/\.js$/, '').split('/')) {
@@ -901,12 +611,7 @@ const Sandbox = (() => {
     return fromParts.join('/');
   }
 
-  const _globalKeys = [];
-
-  function setGlobal(key, value) {
-    window[key] = value;
-    _globalKeys.push(key);
-  }
+  function setGlobal(key, value) { window[key] = value; _globalKeys.push(key); }
 
   function setupGlobals(appData) {
     const ctx = createContext(appData);
@@ -918,50 +623,36 @@ const Sandbox = (() => {
     setGlobal('ViewModel', ctx.ViewModel);
   }
 
-  function cleanupGlobals() {
-    for (const key of _globalKeys) {
-      try { delete window[key]; } catch (_) { }
-    }
-    _globalKeys.length = 0;
-  }
+  function arrayBufferToText(ab) { return new TextDecoder().decode(ab); }
 
   function executeModule(code, moduleKey, appData) {
     if (_moduleCache.has(moduleKey)) return _moduleCache.get(moduleKey);
+    if (!code && appData.hapFiles) {
+      for (const p of [moduleKey, 'assets/js/default/' + moduleKey, 'assets/js/' + moduleKey]) {
+        const raw = appData.hapFiles[p];
+        if (raw) { code = raw instanceof ArrayBuffer ? arrayBufferToText(raw) : raw; break; }
+      }
+    }
+    if (!code) { console.error(`[Sandbox] Module not found: ${moduleKey}`); const f = {}; _moduleCache.set(moduleKey, f); return f; }
 
-    let processedCode = code;
-    processedCode = processedCode.replace(/\/\/# sourceMappingURL=.*$/gm, '');
-
+    let processedCode = code.replace(/\/\/# sourceMappingURL=.*$/gm, '');
     const isCompiledBundle = processedCode.trimStart().startsWith('(function(');
 
     if (!isCompiledBundle) {
       processedCode = processedCode.replace(
         /import\s+(\w+)\s+from\s+['"]([^'"]+)['"];/g,
         (_, v, p) => {
-          if (p.startsWith('@system.') || p.startsWith('system.')) {
-            const mod = p.startsWith('@') ? p.slice(1) : p;
-            return `var ${v} = requireNative('${mod}');`;
-          }
+          if (p.startsWith('@system.') || p.startsWith('system.')) { const mod = p.startsWith('@') ? p.slice(1) : p; return `var ${v} = requireNative('${mod}');`; }
           return `var ${v} = __require('${p}');`;
         }
       );
-      processedCode = processedCode.replace(
-        /export\s+default\s+/,
-        'window.__esm_result = '
-      );
+      processedCode = processedCode.replace(/export\s+default\s+/, 'window.__esm_result = ');
     }
 
     try {
       setupGlobals(appData);
-
-      if (!isCompiledBundle) {
-        setGlobal('__require', (importPath) => {
-          const resolvedKey = resolveImportPath(moduleKey, importPath);
-          return executeModule(null, resolvedKey, appData);
-        });
-      }
-
+      if (!isCompiledBundle) setGlobal('__require', (importPath) => executeModule(null, resolveImportPath(moduleKey, importPath), appData));
       const result = new Function('return ' + processedCode)();
-
       const finalResult = result !== undefined ? result : window.__esm_result;
       delete window.__esm_result;
       _moduleCache.set(moduleKey, finalResult);
@@ -980,22 +671,15 @@ const Sandbox = (() => {
     DeviceFeatureAppLifecycle.setAppData(appData);
     DeviceFeaturePageNav.setAppData(appData);
     _imports = {
-      app: ApiSimApp,
-      battery: ApiSimBattery,
-      brightness: ApiSimBrightness,
-      device: ApiSimDevice,
-      file: ApiSimFile,
-      storage: ApiSimStorage,
-      vibrator: ApiSimVibrator,
-      wearengine: ApiSimWearengine,
+      app: ApiSimApp, battery: ApiSimBattery, brightness: ApiSimBrightness,
+      device: ApiSimDevice, file: ApiSimFile, storage: ApiSimStorage,
+      vibrator: ApiSimVibrator, wearengine: ApiSimWearengine,
     };
     const result = executeModule(appJsCode, 'app', appData);
     _appExports = result;
     if (result) {
       const appObj = result.data || result;
-      if (typeof appObj.setImports === 'function') {
-        appObj.setImports(_imports);
-      }
+      if (typeof appObj.setImports === 'function') appObj.setImports(_imports);
       setGlobal('$app', appObj);
       const _origGetImports = window.$app.getImports ? window.$app.getImports.bind(window.$app) : null;
       window.$app.getImports = function () {
@@ -1012,28 +696,16 @@ const Sandbox = (() => {
     return executeModule(pageCode, pagePath, appData);
   }
 
-  function getImports() { return _imports; }
-  function getAppExports() { return _appExports; }
-  function getLastViewModel() { return _lastViewModel; }
+  function setViewModelUpdateCallback(cb) { if (_lastViewModel) _lastViewModel._onUpdate = cb; }
 
-  function setViewModelUpdateCallback(cb) {
-    if (_lastViewModel) _lastViewModel._onUpdate = cb;
-  }
+  return {
+    initApp, initPage, setOnAppTerminate, setImageSrcResolver,
+    setViewModelUpdateCallback, cleanupReactive, destroy,
+    getImports: () => _imports,
+    getAppExports: () => _appExports,
+    getLastViewModel: () => _lastViewModel,
+    getLastError: () => _lastError,
+  };
+}
 
-  function cleanupReactive() {
-    _reactive.cleanup();
-  }
-
-  function reset() {
-    _imports = {};
-    _appExports = null;
-    _moduleCache.clear();
-    _onAppTerminate = null;
-    _lastViewModel = null;
-    _lastError = null;
-    _imageSrcResolver = null;
-    cleanupReactive();
-  }
-
-  return { initApp, initPage, getImports, getAppExports, setOnAppTerminate, setImageSrcResolver, getLastViewModel, setViewModelUpdateCallback, cleanupReactive, reset, getLastError: () => _lastError };
-})();
+var Sandbox = createSandbox();

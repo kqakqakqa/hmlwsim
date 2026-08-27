@@ -5,9 +5,10 @@
  */
 const ApiSimDevice = (() => {
   function getInfo(callbacks) {
-    const info = DeviceFeatureDisplay.getDeviceInfo();
-    callbacks.success && callbacks.success({ ...info });
-    callbacks.complete && callbacks.complete();
+    if (!callbacks) return;
+    var info = DeviceFeatureDisplay.getDeviceInfo();
+    if (typeof callbacks.success === 'function') callbacks.success(Object.assign({}, info));
+    if (typeof callbacks.complete === 'function') callbacks.complete();
   }
 
   return { getInfo };

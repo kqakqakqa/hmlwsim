@@ -6,8 +6,8 @@
 const ApiSimVibrator = (() => {
   function start(callbacks) {
     DeviceFeatureVibrator.vibrate();
-    callbacks.success && callbacks.success();
-    callbacks.complete && callbacks.complete();
+    if (callbacks && typeof callbacks.success === 'function') callbacks.success();
+    if (callbacks && typeof callbacks.complete === 'function') callbacks.complete();
   }
 
   function stop() {

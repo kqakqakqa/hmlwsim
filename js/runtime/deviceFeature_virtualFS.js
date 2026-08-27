@@ -1,10 +1,22 @@
 /**
  * Device Feature: Virtual Filesystem
- * Simulates internal://app/ storage using Map + localStorage
+ * Simulates real device file system structure:
+ * - internal://app/ → /user/ace/data/[bundleName]/
+ * - /user/ace/run/[bundleName]/ → extracted HAP files
+ * Supports .. path traversal
  */
 const DeviceFeatureVirtualFS = (() => {
   const store = new Map();
   const LS_PREFIX = 'hmlwsim_fs_';
+  let _bundleName = '';
+
+  function setBundleName(name) {
+    _bundleName = name;
+  }
+
+  function getBundleName() {
+    return _bundleName;
+  }
 
   /**
    * Initialize from localStorage
@@ -19,11 +31,58 @@ const DeviceFeatureVirtualFS = (() => {
     }
   }
 
-  function normalizePath(uri) {
-    return uri.replace(/^internal:\/\/app\/?/, '').replace(/\\/g, '/');
+  /**
+   * Resolve .. path segments
+   */
+  function resolvePath(path) {
+    const parts = path.split('/').filter(Boolean);
+    const resolved = [];
+    for (const part of parts) {
+      if (part === '..') {
+        resolved.pop();
+      } else if (part !== '.') {
+        resolved.push(part);
+      }
+    }
+    return resolved.join('/');
   }
 
+  /**
+   * Normalize URI to internal path
+   * internal://app/xxx → /user/ace/data/[bundleName]/xxx
+   * Supports .. traversal
+   */
+  function normalizePath(uri) {
+    let normalized = uri.replace(/\\/g, '/');
+    
+    // Handle internal://app/ protocol
+    if (normalized.startsWith('internal://app')) {
+      const rest = normalized.substring('internal://app'.length);
+      const path = rest.startsWith('/') ? rest.substring(1) : rest;
+      if (_bundleName) {
+        return resolvePath('/user/ace/data/' + _bundleName + '/' + path);
+      }
+      return resolvePath(path);
+    }
+    
+    // Handle absolute paths (including /user/ace/run/...)
+    if (normalized.startsWith('/')) {
+      return resolvePath(normalized);
+    }
+    
+    return resolvePath(normalized);
+  }
+
+  /**
+   * Convert internal path back to URI
+   */
   function toInternalPath(normalized) {
+    if (_bundleName) {
+      const dataPrefix = '/user/ace/data/' + _bundleName + '/';
+      if (normalized.startsWith(dataPrefix)) {
+        return 'internal://app/' + normalized.substring(dataPrefix.length);
+      }
+    }
     return 'internal://app/' + normalized;
   }
 
@@ -34,11 +93,11 @@ const DeviceFeatureVirtualFS = (() => {
     const path = normalizePath(uri);
     const content = store.get(path);
     if (content !== undefined) {
-      callbacks.success && callbacks.success({ text: content });
+      if (callbacks && typeof callbacks.success === 'function') callbacks.success({ text: content });
     } else {
-      callbacks.fail && callbacks.fail('File not found', 301);
+      if (callbacks && typeof callbacks.fail === 'function') callbacks.fail('File not found', 301);
     }
-    callbacks.complete && callbacks.complete();
+    if (callbacks && typeof callbacks.complete === 'function') callbacks.complete();
   }
 
   /**
@@ -56,8 +115,8 @@ const DeviceFeatureVirtualFS = (() => {
     } catch (e) {
       // localStorage full - silently fail
     }
-    callbacks.success && callbacks.success();
-    callbacks.complete && callbacks.complete();
+    if (callbacks && typeof callbacks.success === 'function') callbacks.success();
+    if (callbacks && typeof callbacks.complete === 'function') callbacks.complete();
   }
 
   /**
@@ -101,8 +160,8 @@ const DeviceFeatureVirtualFS = (() => {
       }
     }
 
-    callbacks.success && callbacks.success({ fileList });
-    callbacks.complete && callbacks.complete();
+    if (callbacks && typeof callbacks.success === 'function') callbacks.success({ fileList });
+    if (callbacks && typeof callbacks.complete === 'function') callbacks.complete();
   }
 
   /**
@@ -111,8 +170,8 @@ const DeviceFeatureVirtualFS = (() => {
   function mkdir(uri, callbacks) {
     const path = normalizePath(uri);
     // Directories are implicit in our Map-based FS
-    callbacks.success && callbacks.success();
-    callbacks.complete && callbacks.complete();
+    if (callbacks && typeof callbacks.success === 'function') callbacks.success();
+    if (callbacks && typeof callbacks.complete === 'function') callbacks.complete();
   }
 
   /**
@@ -122,8 +181,8 @@ const DeviceFeatureVirtualFS = (() => {
     const path = normalizePath(uri);
     store.delete(path);
     try { localStorage.removeItem(LS_PREFIX + path); } catch (e) {}
-    callbacks.success && callbacks.success();
-    callbacks.complete && callbacks.complete();
+    if (callbacks && typeof callbacks.success === 'function') callbacks.success();
+    if (callbacks && typeof callbacks.complete === 'function') callbacks.complete();
   }
 
   /**
@@ -134,8 +193,8 @@ const DeviceFeatureVirtualFS = (() => {
     const dstPath = normalizePath(dstUri);
     const content = store.get(srcPath);
     if (content === undefined) {
-      callbacks.fail && callbacks.fail('Source not found', 301);
-      callbacks.complete && callbacks.complete();
+      if (callbacks && typeof callbacks.fail === 'function') callbacks.fail('Source not found', 301);
+      if (callbacks && typeof callbacks.complete === 'function') callbacks.complete();
       return;
     }
     store.set(dstPath, content);
@@ -144,8 +203,8 @@ const DeviceFeatureVirtualFS = (() => {
       localStorage.setItem(LS_PREFIX + dstPath, content);
       localStorage.removeItem(LS_PREFIX + srcPath);
     } catch (e) {}
-    callbacks.success && callbacks.success();
-    callbacks.complete && callbacks.complete();
+    if (callbacks && typeof callbacks.success === 'function') callbacks.success();
+    if (callbacks && typeof callbacks.complete === 'function') callbacks.complete();
   }
 
   /**
@@ -156,14 +215,14 @@ const DeviceFeatureVirtualFS = (() => {
     const dstPath = normalizePath(dstUri);
     const content = store.get(srcPath);
     if (content === undefined) {
-      callbacks.fail && callbacks.fail('Source not found', 301);
-      callbacks.complete && callbacks.complete();
+      if (callbacks && typeof callbacks.fail === 'function') callbacks.fail('Source not found', 301);
+      if (callbacks && typeof callbacks.complete === 'function') callbacks.complete();
       return;
     }
     store.set(dstPath, content);
     try { localStorage.setItem(LS_PREFIX + dstPath, content); } catch (e) {}
-    callbacks.success && callbacks.success();
-    callbacks.complete && callbacks.complete();
+    if (callbacks && typeof callbacks.success === 'function') callbacks.success();
+    if (callbacks && typeof callbacks.complete === 'function') callbacks.complete();
   }
 
   /**
@@ -172,30 +231,33 @@ const DeviceFeatureVirtualFS = (() => {
   function getInfo(uri, callbacks) {
     const path = normalizePath(uri);
     if (store.has(path)) {
-      callbacks.success && callbacks.success({
+      if (callbacks && typeof callbacks.success === 'function') callbacks.success({
         size: store.get(path).length || 0,
         exist: true,
       });
     } else {
-      callbacks.fail && callbacks.fail('Not found', 301);
+      if (callbacks && typeof callbacks.fail === 'function') callbacks.fail('Not found', 301);
     }
-    callbacks.complete && callbacks.complete();
+    if (callbacks && typeof callbacks.complete === 'function') callbacks.complete();
   }
 
   /**
-   * Import files from unpacked app (rawfiles, etc.)
+   * Import files from unpacked app to /user/ace/run/[bundleName]/ path
    */
-  function importFiles(files) {
+  function importFiles(files, bundleName) {
+    const prefix = bundleName ? '/user/ace/run/' + bundleName + '/' : '';
     for (const [path, content] of Object.entries(files)) {
-      const normalized = path.replace(/\\/g, '/');
-      if (typeof content === 'string') {
-        store.set(normalized, content);
-        try { localStorage.setItem(LS_PREFIX + normalized, content); } catch (e) {}
-      } else if (content instanceof ArrayBuffer) {
-        const base64 = arrayBufferToBase64(content);
-        store.set(normalized, base64);
-        try { localStorage.setItem(LS_PREFIX + normalized, base64); } catch (e) {}
+      const normalized = resolvePath(prefix + path.replace(/\\/g, '/'));
+      let stored;
+      if (content instanceof ArrayBuffer) {
+        stored = arrayBufferToBase64(content);
+      } else if (typeof content === 'string') {
+        stored = content;
+      } else {
+        continue;
       }
+      store.set(normalized, stored);
+      try { localStorage.setItem(LS_PREFIX + normalized, stored); } catch (e) {}
     }
   }
 
@@ -218,5 +280,5 @@ const DeviceFeatureVirtualFS = (() => {
     keys.forEach(k => localStorage.removeItem(k));
   }
 
-  return { init, readText, writeText, writeFile, list, mkdir, deleteFile, move, copy, getInfo, importFiles, clear };
+  return { init, setBundleName, getBundleName, readText, writeText, writeFile, list, mkdir, deleteFile, move, copy, getInfo, importFiles, clear };
 })();

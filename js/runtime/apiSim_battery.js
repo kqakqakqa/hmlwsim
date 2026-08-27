@@ -5,9 +5,10 @@
  */
 const ApiSimBattery = (() => {
   function getStatus(callbacks) {
-    const status = DeviceFeatureBattery.getStatus();
-    callbacks.success && callbacks.success(status);
-    callbacks.complete && callbacks.complete();
+    if (!callbacks) return;
+    var status = DeviceFeatureBattery.getStatus();
+    if (typeof callbacks.success === 'function') callbacks.success(status);
+    if (typeof callbacks.complete === 'function') callbacks.complete(status);
   }
 
   return { getStatus };

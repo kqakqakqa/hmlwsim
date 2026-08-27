@@ -9,58 +9,61 @@ const ApiSimWearengine = (() => {
 
   function setPackageName(params) {
     _pairAppName = params.appName;
-    if (params.complete) params.complete();
+    if (params && typeof params.complete === 'function') params.complete();
   }
 
   function setFingerprint(params) {
     _pairAppFingerprint = params.appCert;
-    if (params.complete) params.complete();
+    if (params && typeof params.complete === 'function') params.complete();
   }
 
   function getPeerDevice(callbacks) {
-    const peer = DeviceFeaturePhoneLink.getPeerDevice();
+    if (!callbacks) return;
+    var peer = DeviceFeaturePhoneLink.getPeerDevice();
     if (peer) {
-      callbacks.success && callbacks.success(peer);
+      if (typeof callbacks.success === 'function') callbacks.success(peer);
     } else {
-      callbacks.fail && callbacks.fail('No peer device', -1);
+      if (typeof callbacks.fail === 'function') callbacks.fail('No peer device', -1);
     }
-    callbacks.complete && callbacks.complete();
+    if (typeof callbacks.complete === 'function') callbacks.complete();
   }
 
   function detect(callbacks) {
+    if (!callbacks) return;
     // Always report as installed in simulator
     if (_pairAppName) {
-      callbacks.success && callbacks.success();
+      if (typeof callbacks.success === 'function') callbacks.success();
     } else {
-      callbacks.fail && callbacks.fail('No app configured', -1);
+      if (typeof callbacks.fail === 'function') callbacks.fail('No app configured', -1);
     }
-    callbacks.complete && callbacks.complete();
+    if (typeof callbacks.complete === 'function') callbacks.complete();
   }
 
   function getWearEngineVersion(callbacks) {
-    const version = 'Infinity.Infinity';
-    callbacks.complete && callbacks.complete(version);
-    callbacks.success && callbacks.success(version);
+    var version = 'Infinity.Infinity';
+    if (callbacks && typeof callbacks.complete === 'function') callbacks.complete(version);
+    if (callbacks && typeof callbacks.success === 'function') callbacks.success(version);
   }
 
   function sendMsg(params) {
     console.log('[Wearengine] sendMsg:', params.message);
     DeviceFeaturePhoneLink.sendToPhone(params.message);
-    if (params.success) params.success();
-    if (params.complete) params.complete();
+    if (params && typeof params.success === 'function') params.success();
+    if (params && typeof params.complete === 'function') params.complete();
   }
 
   function subscribeMsg(callbacks) {
-    callbacks.success && callbacks.success({ isRegister: true });
+    if (!callbacks) return;
+    if (typeof callbacks.success === 'function') callbacks.success({ isRegister: true });
 
     // Subscribe and deliver pending messages
-    const pending = DeviceFeaturePhoneLink.subscribeMessages((msg) => {
-      if (callbacks.success) callbacks.success(msg);
+    var pending = DeviceFeaturePhoneLink.subscribeMessages((msg) => {
+      if (typeof callbacks.success === 'function') callbacks.success(msg);
     });
 
     // Deliver any pending messages
     pending.forEach(msg => {
-      if (callbacks.success) callbacks.success(msg);
+      if (typeof callbacks.success === 'function') callbacks.success(msg);
     });
   }
 

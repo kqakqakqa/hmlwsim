@@ -69,6 +69,16 @@ const DeviceFeaturePageNav = (() => {
     return baseParts.join('/');
   }
 
+  function arrayBufferToText(ab) {
+    return new TextDecoder().decode(ab);
+  }
+
+  function getHapFile(hapFiles, path) {
+    const raw = hapFiles[path];
+    if (!raw) return null;
+    return raw instanceof ArrayBuffer ? arrayBufferToText(raw) : raw;
+  }
+
   /**
    * Navigate to a page.
    * Flow: destroy current page → load module → call onInit → render → call onReady → call onShow
@@ -83,16 +93,36 @@ const DeviceFeaturePageNav = (() => {
     const jsKey = pagePath + '.js';
 
     let pageExports = null;
+    // Try to find the module in _appData.modules or _appData.hapFiles
     if (_appData.modules[jsKey]) {
       pageExports = Sandbox.initPage(_appData.modules[jsKey], pagePath, _appData);
       const pageErr = Sandbox.getLastError();
       if (pageErr) console.error('[PageNav] Page Sandbox error:', pageErr.message);
+    } else if (_appData.hapFiles) {
+      const possiblePaths = [
+        jsKey,
+        'assets/js/default/' + jsKey,
+        'assets/js/' + jsKey,
+      ];
+      for (const p of possiblePaths) {
+        const code = getHapFile(_appData.hapFiles, p);
+        if (code) {
+          pageExports = Sandbox.initPage(code, pagePath, _appData);
+          const pageErr = Sandbox.getLastError();
+          if (pageErr) console.error('[PageNav] Page Sandbox error:', pageErr.message);
+          break;
+        }
+      }
     }
     if (!pageExports) {
       const moduleKeys = Object.keys(_appData.modules).filter(k => k.endsWith('.js'));
+      const hapKeys = _appData.hapFiles ? Object.keys(_appData.hapFiles).filter(k => k.endsWith('.js')) : [];
       console.error('[PageNav] Page not found:', pageUri, '(looking for', jsKey + ')');
       if (moduleKeys.length > 0) {
         console.error('[PageNav] Available JS modules:', moduleKeys.join(', '));
+      }
+      if (hapKeys.length > 0) {
+        console.error('[PageNav] Available HAP JS files:', hapKeys.join(', '));
       }
       return;
     }
@@ -117,12 +147,40 @@ const DeviceFeaturePageNav = (() => {
     // Load any separate .css file alongside the compiled ViewModel
     const compiledCssKey = pagePath + '.css';
     var compiledCssContent = _appData.modules[compiledCssKey] || '';
+    if (!compiledCssContent && _appData.hapFiles) {
+      const possibleCssPaths = [
+        compiledCssKey,
+        'assets/js/default/' + compiledCssKey,
+        'assets/js/' + compiledCssKey,
+      ];
+      for (const p of possibleCssPaths) {
+        const css = getHapFile(_appData.hapFiles, p);
+        if (css) {
+          compiledCssContent = css;
+          break;
+        }
+      }
+    }
     if (compiledCssContent) {
       const importRegex = /@import\s+["']([^"']+)["'];?/g;
       let importMatch;
       while ((importMatch = importRegex.exec(compiledCssContent))) {
         const resolvedPath = resolveRelativePath(pagePath, importMatch[1]);
-        const importedCSS = _appData.modules[resolvedPath] || '';
+        var importedCSS = _appData.modules[resolvedPath] || '';
+        if (!importedCSS && _appData.hapFiles) {
+          const possibleImportPaths = [
+            resolvedPath,
+            'assets/js/default/' + resolvedPath,
+            'assets/js/' + resolvedPath,
+          ];
+          for (const p of possibleImportPaths) {
+            const css = getHapFile(_appData.hapFiles, p);
+            if (css) {
+              importedCSS = css;
+              break;
+            }
+          }
+        }
         compiledCssContent = compiledCssContent.replace(importMatch[0], importedCSS);
       }
     }

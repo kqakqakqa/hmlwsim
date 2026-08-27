@@ -19,6 +19,7 @@ const App = (() => {
     setupQuickLoad();
     setupLocalSelectAll();
     setupInvertScroll();
+    setupRestartButton();
     setupResetButton();
     setupScreenshot();
     log('Simulator ready. Drag a .app file onto the watch or use quick load.', 'info');
@@ -133,6 +134,13 @@ const App = (() => {
     }
   }
 
+  function setupRestartButton() {
+    const btn = document.getElementById('restart-btn');
+    if (btn) {
+      btn.addEventListener('click', restartApp);
+    }
+  }
+
   function setupResetButton() {
     const resetBtn = document.getElementById('reset-btn');
     if (resetBtn) {
@@ -174,6 +182,64 @@ const App = (() => {
     });
   }
 
+  function restartApp() {
+    const appData = _appData;
+    if (!appData) {
+      log('No app loaded to restart.', 'warn');
+      return;
+    }
+
+    log('Restarting: ' + appData.bundleName, 'info');
+
+    // Phase 1: Destroy current page and call app onDestroy
+    DeviceFeaturePageNav.clear();
+    DeviceFeatureAppLifecycle.callOnDestroy();
+
+    // Phase 2: Destroy old sandbox entirely, create fresh one
+    Sandbox.destroy();
+    Sandbox = createSandbox();
+
+    // Phase 3: Clear display — simulate app closing (black screen)
+    DeviceFeatureDisplay.clear();
+
+    // Phase 4: After brief pause, re-launch the app
+    setTimeout(function() {
+      // Re-register image src resolver
+      setupImageResolver(appData);
+
+      // NOTE: VirtualFS is intentionally NOT cleared — filesystem persists across restart
+
+      // Re-execute app.js
+      if (appData.appJs) {
+        var appExports = Sandbox.initApp(appData.appJs, appData);
+        DeviceFeatureAppLifecycle.setAppExports(appExports);
+        var appErr = Sandbox.getLastError();
+        if (appErr) log('App Sandbox error: ' + appErr.message, 'error');
+
+        var _navigatedFromOnCreate = false;
+        DeviceFeaturePageNav.onNavigate(async function(pageInfo) {
+          if (!pageInfo) { DeviceFeatureDisplay.clear(); return; }
+          _navigatedFromOnCreate = true;
+          await DeviceFeaturePageNav.navigateTo(pageInfo.uri, pageInfo.params);
+        });
+
+        DeviceFeatureAppLifecycle.callOnCreate();
+
+        if (!_navigatedFromOnCreate) {
+          DeviceFeaturePageNav.navigateTo('pages/index/index', {});
+        }
+      } else {
+        DeviceFeaturePageNav.onNavigate(async function(pageInfo) {
+          if (!pageInfo) { DeviceFeatureDisplay.clear(); return; }
+          await DeviceFeaturePageNav.navigateTo(pageInfo.uri, pageInfo.params);
+        });
+        DeviceFeaturePageNav.navigateTo('pages/index/index', {});
+      }
+
+      log('App restarted.', 'info');
+    }, 300);
+  }
+
   function resetApp() {
     const appData = _appData;
     if (!appData) {
@@ -187,21 +253,19 @@ const App = (() => {
     DeviceFeaturePageNav.clear();
     DeviceFeatureAppLifecycle.callOnDestroy();
 
-    // Reset Sandbox (also clears image src resolver)
-    Sandbox.reset();
+    // Destroy old sandbox entirely, create fresh one
+    Sandbox.destroy();
+    Sandbox = createSandbox();
 
     // Re-register image src resolver
     setupImageResolver(appData);
 
     // Clear and re-initialize VirtualFS
     DeviceFeatureVirtualFS.clear();
+    DeviceFeatureVirtualFS.setBundleName(appData.bundleName);
 
-    // Re-initialize VirtualFS with app data
-    if (appData.files) {
-      for (const [path, data] of Object.entries(appData.files)) {
-        DeviceFeatureVirtualFS.writeFile(path, data);
-      }
-    }
+    // Re-import HAP files to /user/ace/run/[bundleName]/
+    DeviceFeatureVirtualFS.importFiles(appData.hapFiles, appData.bundleName);
 
     // Re-execute app.js
     if (appData.appJs) {
@@ -259,6 +323,33 @@ const App = (() => {
 
     function tryData(data, ext) {
       if (!data) return null;
+      // ArrayBuffer - binary data
+      if (data instanceof ArrayBuffer) {
+        const parsed = parseBinImage(data);
+        if (parsed) return parsed;
+        const mimeType = guessMimeType(ext);
+        const blob = new Blob([data], { type: mimeType });
+        return URL.createObjectURL(blob);
+      }
+      // Base64 string
+      if (typeof data === 'string' && data.length > 0 && !data.startsWith('data:')) {
+        if (/^[A-Za-z0-9+/=]+$/.test(data) && data.length > 100) {
+          try {
+            const binary = atob(data);
+            const bytes = new Uint8Array(binary.length);
+            for (let i = 0; i < binary.length; i++) {
+              bytes[i] = binary.charCodeAt(i);
+            }
+            const ab = bytes.buffer;
+            const parsed = parseBinImage(ab);
+            if (parsed) return parsed;
+            const mimeType = guessMimeType(ext);
+            const blob = new Blob([ab], { type: mimeType });
+            return URL.createObjectURL(blob);
+          } catch (e) {}
+        }
+        return null;
+      }
       return tryParseBin(data) || makeBlobUrl(data, guessMimeType(ext));
     }
 
@@ -287,6 +378,28 @@ const App = (() => {
     const imageResolver = (src) => {
       const normalized = src.replace(/^\//, '');
       const { ext, dir, baseName, base } = splitPath(normalized);
+
+      // Try to find image in hapFiles first (full path)
+      if (appData.hapFiles) {
+        // Try exact match with various prefixes
+        const possiblePaths = [
+          normalized,
+          'assets/entry/resources/' + normalized,
+          'assets/entry/resources/base/media/' + normalized,
+          'assets/js/default/' + normalized,
+          'assets/js/' + normalized,
+        ];
+        for (const p of possiblePaths) {
+          const data = appData.hapFiles[p];
+          if (data) return tryData(data, ext);
+        }
+
+        // Try to find by base name in hapFiles
+        for (const [key, data] of Object.entries(appData.hapFiles)) {
+          const keyBase = key.replace(/\.[^.]+$/, '').split('/').pop();
+          if (keyBase === baseName) return tryData(data, ext);
+        }
+      }
 
       // Modules: exact match first, then same base name (prefer same ext)
       let data = appData.modules[normalized];
@@ -331,8 +444,15 @@ const App = (() => {
       DeviceFeaturePageNav.clear();
       DeviceFeatureAppLifecycle.callOnDestroy();
 
+      // Destroy old sandbox, create fresh one
+      Sandbox.destroy();
+      Sandbox = createSandbox();
+
       const appData = await Unpacker.loadFromFile(file);
       _appData = appData;
+
+      // Set bundle name for file system paths
+      DeviceFeatureVirtualFS.setBundleName(appData.bundleName);
 
       // Register image src resolver
       setupImageResolver(appData);
@@ -340,13 +460,13 @@ const App = (() => {
       log('Bundle: ' + appData.bundleName, 'info');
       log('Version: ' + appData.version + ' | Device: ' + appData.deviceType, 'info');
       log('Pages: ' + appData.pages.join(', '), 'info');
-      log('HAP files: ' + (appData.hapFiles || []).length, 'info');
+      log('HAP files: ' + Object.keys(appData.hapFiles || {}).length, 'info');
       const jsModules = Object.keys(appData.modules).filter(k => k.endsWith('.js'));
       log('JS modules: ' + jsModules.join(', '), 'info');
       if (appData._configRaw) log('Config: ' + appData._configRaw, 'info');
-      const hapFiles = appData.hapFiles || [];
-      const jsFiles = hapFiles.filter(f => f.endsWith('.js') && !f.endsWith('.bc'));
-      const cssFiles = hapFiles.filter(f => f.endsWith('.css'));
+      const hapFiles = appData.hapFiles || {};
+      const jsFiles = Object.keys(hapFiles).filter(f => f.endsWith('.js') && !f.endsWith('.bc'));
+      const cssFiles = Object.keys(hapFiles).filter(f => f.endsWith('.css'));
       log('HAP .js files: ' + jsFiles.join(', '), 'info');
       log('HAP .css files: ' + cssFiles.join(', '), 'info');
       log('Module keys: ' + Object.keys(appData.modules).join(', '), 'info');
@@ -356,6 +476,12 @@ const App = (() => {
 
       DeviceFeatureVirtualFS.clear();
       DeviceFeaturePageNav.clear();
+
+      // Import all HAP files to /user/ace/run/[bundleName]/
+      DeviceFeatureVirtualFS.importFiles(appData.hapFiles, appData.bundleName);
+      const hapFileCount = Object.keys(appData.hapFiles || {}).length;
+      log('Imported ' + hapFileCount + ' files to /user/ace/run/' + appData.bundleName + '/', 'info');
+      log('Internal URI: internal://app/ → /user/ace/data/' + appData.bundleName + '/', 'info');
 
       if (appData.appJs) {
         const appExports = Sandbox.initApp(appData.appJs, appData);
