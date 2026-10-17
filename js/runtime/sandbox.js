@@ -204,6 +204,17 @@ function createSandbox() {
     'filter', 'backdropFilter', 'maskImage',
   ]);
 
+  const LENGTH_PROPS = new Set([
+    'width', 'height', 'maxWidth', 'maxHeight', 'minWidth', 'minHeight',
+    'top', 'right', 'bottom', 'left', 'fontSize', 'lineHeight', 'letterSpacing',
+    'textIndent', 'padding', 'paddingLeft', 'paddingRight', 'paddingTop', 'paddingBottom',
+    'paddingStart', 'paddingEnd', 'margin', 'marginLeft', 'marginRight', 'marginTop', 'marginBottom',
+    'marginStart', 'marginEnd', 'borderWidth', 'borderTopWidth', 'borderBottomWidth',
+    'borderLeftWidth', 'borderRightWidth', 'borderRadius', 'borderTopLeftRadius',
+    'borderTopRightRadius', 'borderBottomLeftRadius', 'borderBottomRightRadius',
+    'flexBasis', 'gridGap', 'gridColumnsGap', 'gridRowsGap',
+  ]);
+
   function formatColor(val) {
     if (typeof val === 'number') {
       let alpha = (val >>> 24) & 0xFF;
@@ -240,6 +251,8 @@ function createSandbox() {
     if (STRING_PROPS.has(key)) return String(val);
     if (key === 'animationIterationCount' && val === -1) return 'infinite';
     if (typeof val === 'number' && !UNITLESS_PROPS.has(key)) return val + 'px';
+    // Lite Wearable 的长度值默认按像素解释，保留百分比和已有单位。
+    if (LENGTH_PROPS.has(key) && typeof val === 'string' && /^[+-]?(?:\d+(?:\.\d*)?|\.\d+)$/.test(val.trim())) return val.trim() + 'px';
     return String(val);
   }
 
