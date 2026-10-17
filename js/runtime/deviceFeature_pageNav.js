@@ -43,6 +43,7 @@ const DeviceFeaturePageNav = (() => {
    */
   function destroyCurrentPage() {
     if (!_currentPage) return;
+    DeviceFeatureTouch.disable();
     const { exports: pageExports, data: pageData } = _currentPage;
 
     if (pageExports && pageExports.onHide) {

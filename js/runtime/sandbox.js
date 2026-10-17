@@ -344,7 +344,8 @@ function createSandbox() {
       for (const [event, handler] of Object.entries(obj)) {
         if (typeof handler === 'function') {
           el.addEventListener(event, (e) => {
-            if (phase === 'stop' || phase === 'captureStop') e.stopPropagation();
+            // 真机上 swipe 由最近的处理组件消费，不再触发祖先的滑动返回。
+            if (phase === 'stop' || phase === 'captureStop' || (event === 'swipe' && phase !== 'capture')) e.stopPropagation();
             handler.call(_lastViewModel ? _lastViewModel._data : {}, e);
           }, phase === 'capture' || phase === 'captureStop');
         }
