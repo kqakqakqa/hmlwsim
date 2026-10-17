@@ -49,6 +49,34 @@
         <label style="margin-top:0.5rem;">Battery <span id="battery-value">85%</span></label>
         <input type="range" id="battery-slider" min="0" max="100" value="85" disabled>
       </div>
+      <div class="control-group sensor-controls">
+        <label>Linear acceleration</label>
+        <label class="sensor-toggle"><span>Show real values</span><input type="checkbox" id="sensor-accelerometer" checked></label>
+      </div>
+      <div class="control-group sensor-controls">
+        <label>Rotation rate</label>
+        <label class="sensor-toggle"><span>Show real values</span><input type="checkbox" id="sensor-gyroscope" checked></label>
+      </div>
+      <div class="control-group sensor-controls">
+        <label>Magnetic field</label>
+        <label class="sensor-toggle"><span>Show real values</span><input type="checkbox" id="sensor-compass" checked></label>
+      </div>
+      <div class="control-group sensor-controls">
+        <label>Barometer</label>
+        <label class="sensor-toggle"><span>Show real values</span><input type="checkbox" id="sensor-barometer"></label>
+      </div>
+      <div class="control-group sensor-controls">
+        <label>Step count <span id="sensor-step-value">0</span></label>
+        <input type="number" id="sensor-step-count" min="0" max="999999" value="0">
+      </div>
+      <div class="control-group sensor-controls">
+        <label>Heart rate <span id="sensor-heart-rate-value">255</span></label>
+        <label class="sensor-toggle"><span>Not detected</span><input type="checkbox" id="sensor-heart-rate-invalid" checked></label>
+        <input type="range" id="sensor-heart-rate" min="30" max="220" value="72" disabled>
+      </div>
+      <div class="control-group sensor-controls">
+        <label class="sensor-toggle"><span>Wearing state</span><input type="checkbox" id="sensor-on-body"></label>
+      </div>
 
       <h2>WearEngine</h2>
       <div class="control-group" id="wearengine-panel">
@@ -153,6 +181,13 @@
     <script src="js/runtime/apiSim_device.js"></script>
     <script src="js/runtime/apiSim_brightness.js"></script>
     <script src="js/runtime/apiSim_vibrator.js"></script>
+    <script src="js/runtime/apiSim_sensor_accelerometer.js"></script>
+    <script src="js/runtime/apiSim_sensor_gyroscope.js"></script>
+    <script src="js/runtime/apiSim_sensor_compass.js"></script>
+    <script src="js/runtime/apiSim_sensor_stepCounter.js"></script>
+    <script src="js/runtime/apiSim_sensor_barometer.js"></script>
+    <script src="js/runtime/apiSim_sensor_heartRate.js"></script>
+    <script src="js/runtime/apiSim_sensor_onBodyState.js"></script>
     <script src="js/runtime/apiSim_sensor.js"></script>
     <script src="js/runtime/apiSim_fetch.js"></script>
     <script src="js/runtime/apiSim_wearengine.js"></script>

@@ -10,6 +10,12 @@ const SensorPanel = (() => {
   let _heightInput = null;
   let _onConfigChange = null;
   let _systemBatteryInterval = null;
+  let _sensorHeartRateSlider = null;
+  let _sensorHeartRateValue = null;
+  let _sensorHeartRateInvalid = null;
+  let _sensorStepCount = null;
+  let _sensorStepValue = null;
+  let _sensorBodyStateToggle = null;
 
   function init(callbacks) {
     _onConfigChange = callbacks.onConfigChange;
@@ -20,6 +26,14 @@ const SensorPanel = (() => {
     _shapeSelect = document.getElementById('shape-select');
     _widthInput = document.getElementById('width-input');
     _heightInput = document.getElementById('height-input');
+    _sensorHeartRateSlider = document.getElementById('sensor-heart-rate');
+    _sensorHeartRateValue = document.getElementById('sensor-heart-rate-value');
+    _sensorHeartRateInvalid = document.getElementById('sensor-heart-rate-invalid');
+    _sensorStepCount = document.getElementById('sensor-step-count');
+    _sensorStepValue = document.getElementById('sensor-step-value');
+    _sensorBodyStateToggle = document.getElementById('sensor-on-body');
+
+    setupSensorControls();
 
     if (_useSystemBattery) {
       _useSystemBattery.addEventListener('change', () => {
@@ -58,6 +72,45 @@ const SensorPanel = (() => {
     }
 
     startSystemBattery();
+  }
+
+  function setupSensorControls() {
+    ['accelerometer', 'gyroscope', 'compass', 'barometer'].forEach(type => {
+      const toggle = document.getElementById('sensor-' + type);
+      if (!toggle) return;
+      DeviceFeatureSensor.setMode(type, toggle.checked);
+      toggle.addEventListener('change', () => DeviceFeatureSensor.setMode(type, toggle.checked));
+    });
+
+    if (_sensorStepCount) {
+      const updateSteps = () => {
+        const value = Math.max(0, parseInt(_sensorStepCount.value, 10) || 0);
+        if (_sensorStepValue) _sensorStepValue.textContent = value;
+        DeviceFeatureSensor.setValue('stepCounter', { steps: value });
+      };
+      _sensorStepCount.addEventListener('input', updateSteps);
+      updateSteps();
+    }
+
+    if (_sensorHeartRateSlider) {
+      const updateHeartRate = () => {
+        const invalid = _sensorHeartRateInvalid && _sensorHeartRateInvalid.checked;
+        const value = invalid ? 255 : parseInt(_sensorHeartRateSlider.value, 10);
+        if (_sensorHeartRateValue) _sensorHeartRateValue.textContent = invalid ? '255' : value + ' bpm';
+        _sensorHeartRateSlider.disabled = invalid;
+        DeviceFeatureSensor.setValue('heartRate', { heartRate: value });
+      };
+      _sensorHeartRateSlider.addEventListener('input', updateHeartRate);
+      if (_sensorHeartRateInvalid) _sensorHeartRateInvalid.addEventListener('change', updateHeartRate);
+      updateHeartRate();
+    }
+
+    if (_sensorBodyStateToggle) {
+      _sensorBodyStateToggle.addEventListener('change', () => {
+        DeviceFeatureSensor.setValue('onBodyState', { value: _sensorBodyStateToggle.checked });
+      });
+      DeviceFeatureSensor.setValue('onBodyState', { value: _sensorBodyStateToggle.checked });
+    }
   }
 
   function startSystemBattery() {

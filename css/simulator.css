@@ -144,6 +144,40 @@ textarea {
   font-weight: 600;
 }
 
+.sensor-controls {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.sensor-controls > label:first-child {
+  margin-bottom: 0;
+}
+
+.sensor-toggle {
+  display: flex !important;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 0 !important;
+  cursor: pointer;
+  font-size: 0.8125rem !important;
+  font-weight: 400 !important;
+  color: #6e6e73 !important;
+}
+
+.sensor-toggle input {
+  width: 1.125rem;
+  height: 1.125rem;
+  cursor: pointer;
+}
+
+#sensor-heart-rate-value {
+  float: right;
+  color: #0071e3;
+  font-size: 0.8125rem;
+  font-weight: 600;
+}
+
 /* WearEngine panel */
 #wearengine-panel {
   display: flex;
