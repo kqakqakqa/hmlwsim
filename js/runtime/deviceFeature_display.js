@@ -154,22 +154,46 @@ const DeviceFeatureDisplay = (() => {
     });
   }
 
+  function _swiperPageAtOffset(sw) {
+    if (!sw.children.length) return -1;
+    const vertical = sw.getAttribute('vertical') === 'true';
+    const offset = vertical ? sw.scrollTop : sw.scrollLeft;
+    return Array.from(sw.children).reduce((nearest, page, index, pages) => {
+      const distance = Math.abs((vertical ? page.offsetTop : page.offsetLeft) - offset);
+      const nearestDistance = Math.abs((vertical ? pages[nearest].offsetTop : pages[nearest].offsetLeft) - offset);
+      return distance < nearestDistance ? index : nearest;
+    }, 0);
+  }
+
+  function setSwiperIndex(sw, index, notify = true, behavior = 'smooth') {
+    const idx = Number(index);
+    if (!Number.isInteger(idx) || idx < 0 || !sw.isConnected || !sw.children[idx]) return false;
+    const previous = sw._swiperIndex;
+    const page = sw.children[idx];
+    const vertical = sw.getAttribute('vertical') === 'true';
+    sw._swiperIndex = idx;
+    sw.setAttribute('index', String(idx));
+    if (vertical) sw.scrollTo({ top: page.offsetTop, behavior });
+    else sw.scrollTo({ left: page.offsetLeft, behavior });
+    if (notify && previous !== idx) {
+      const event = new CustomEvent('change');
+      event.index = idx;
+      sw.dispatchEvent(event);
+    }
+    return true;
+  }
+
+  function syncSwiperIndex(sw) {
+    const idx = _swiperPageAtOffset(sw);
+    return idx >= 0 && setSwiperIndex(sw, idx);
+  }
+
   function _fixSwiperIndex() {
     const swipers = _shadowRoot.querySelectorAll('swiper');
     swipers.forEach(sw => {
-      const idx = parseInt(sw.getAttribute('index'), 10);
-      if (!isNaN(idx) && idx > 0) {
-        const isVertical = sw.getAttribute('vertical') === 'true';
-        requestAnimationFrame(() => {
-          const page = sw.children[idx];
-          if (!page) return;
-          if (isVertical) {
-            sw.scrollTo({ top: page.offsetTop, behavior: 'auto' });
-          } else {
-            sw.scrollTo({ left: page.offsetLeft, behavior: 'auto' });
-          }
-        });
-      }
+      const idx = Number(sw.getAttribute('index'));
+      sw._swiperIndex = sw.children[idx] ? idx : 0;
+      if (sw.children[sw._swiperIndex]) setSwiperIndex(sw, sw._swiperIndex, false, 'auto');
     });
   }
 
@@ -190,17 +214,19 @@ const DeviceFeatureDisplay = (() => {
     });
   }
 
-  /**
-   * Bind ref elements for direct DOM access
-   */
+
   function bindRefs() {
     const refElements = _shadowRoot.querySelectorAll('[data-ref]');
     refElements.forEach(el => {
       const refName = el.getAttribute('data-ref');
       _refs[refName] = el;
 
-      // Add rotation support for list and slider refs
-      if (el.tagName === 'LIST' || el.tagName === 'SLIDER') {
+      if (el.tagName === 'SWIPER') {
+        el.swipeTo = (opts) => setSwiperIndex(el, opts && opts.index);
+      }
+
+      // Add rotation support for scrollable refs
+      if (el.tagName === 'LIST' || el.tagName === 'SLIDER' || el.tagName === 'SWIPER') {
         el.rotation = (opts) => {
           el._rotationFocused = !!opts.focus;
         };
@@ -254,7 +280,7 @@ const DeviceFeatureDisplay = (() => {
   }
 
   return {
-    init, configure, renderViewModel, registerHandler, getRef,
+    init, configure, renderViewModel, registerHandler, getRef, setSwiperIndex, syncSwiperIndex,
     onRotation, triggerRotation, clear, setImageSrcResolver,
     getDeviceInfo, getBrightnessMode, setBrightnessMode,
   };

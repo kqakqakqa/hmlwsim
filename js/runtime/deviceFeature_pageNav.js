@@ -217,6 +217,9 @@ const DeviceFeaturePageNav = (() => {
           el.dispatchEvent(changeEvent);
         } else if (el.tagName === 'LIST') {
           el.scrollTop -= delta * 30;
+        } else if (el.tagName === 'SWIPER') {
+          el.scrollTop -= delta * 30;
+          DeviceFeatureDisplay.syncSwiperIndex(el);
         }
       });
     });

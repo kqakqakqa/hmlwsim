@@ -97,16 +97,7 @@ function createSandbox() {
       el.setAttribute('src', _resolveImageSrc(String(val)));
     } else if (tag === 'swiper' && key === 'index') {
       el.setAttribute('index', String(val));
-      const idx = parseInt(val, 10);
-      if (!isNaN(idx)) {
-        const isVertical = el.getAttribute('vertical') === 'true';
-        requestAnimationFrame(() => {
-          const page = el.children[idx];
-          if (!page) return;
-          if (isVertical) el.scrollTo({ top: page.offsetTop, behavior: 'smooth' });
-          else el.scrollTo({ left: page.offsetLeft, behavior: 'smooth' });
-        });
-      }
+      DeviceFeatureDisplay.setSwiperIndex(el, val);
     } else if (tag === 'progress') {
       if (key === 'type') el.setAttribute('type', String(val));
       else if (key === 'percent' || key === 'value') { el.setAttribute('value', String(val)); el.setAttribute('max', '100'); }

@@ -121,20 +121,7 @@ const DeviceFeatureTouch = (() => {
 
   function finishSwiperDrag(gesture) {
     const owner = gesture.dragOwner;
-    if (!owner || owner.tagName !== 'SWIPER') return;
-    const isVertical = owner.getAttribute('vertical') === 'true';
-    const pages = Array.from(owner.children);
-    if (!pages.length) return;
-    const offset = isVertical ? owner.scrollTop : owner.scrollLeft;
-    const index = pages.reduce((nearest, page, pageIndex) => {
-      const pageOffset = isVertical ? page.offsetTop : page.offsetLeft;
-      const nearestOffset = isVertical ? pages[nearest].offsetTop : pages[nearest].offsetLeft;
-      return Math.abs(pageOffset - offset) < Math.abs(nearestOffset - offset) ? pageIndex : nearest;
-    }, 0);
-    const pageOffset = isVertical ? pages[index].offsetTop : pages[index].offsetLeft;
-    owner.scrollTo(isVertical
-      ? { top: pageOffset, behavior: 'smooth' }
-      : { left: pageOffset, behavior: 'smooth' });
+    if (owner && owner.tagName === 'SWIPER') DeviceFeatureDisplay.syncSwiperIndex(owner);
   }
 
   const TAN_15 = Math.tan(15 * Math.PI / 180);
