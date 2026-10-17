@@ -101,8 +101,10 @@ function createSandbox() {
       if (!isNaN(idx)) {
         const isVertical = el.getAttribute('vertical') === 'true';
         requestAnimationFrame(() => {
-          if (isVertical) el.scrollTo({ top: idx * el.clientHeight, behavior: 'smooth' });
-          else el.scrollTo({ left: idx * el.clientWidth, behavior: 'smooth' });
+          const page = el.children[idx];
+          if (!page) return;
+          if (isVertical) el.scrollTo({ top: page.offsetTop, behavior: 'smooth' });
+          else el.scrollTo({ left: page.offsetLeft, behavior: 'smooth' });
         });
       }
     } else if (tag === 'progress') {

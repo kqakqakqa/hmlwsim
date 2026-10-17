@@ -161,10 +161,12 @@ const DeviceFeatureDisplay = (() => {
       if (!isNaN(idx) && idx > 0) {
         const isVertical = sw.getAttribute('vertical') === 'true';
         requestAnimationFrame(() => {
+          const page = sw.children[idx];
+          if (!page) return;
           if (isVertical) {
-            sw.scrollTo({ top: idx * sw.clientHeight, behavior: 'auto' });
+            sw.scrollTo({ top: page.offsetTop, behavior: 'auto' });
           } else {
-            sw.scrollTo({ left: idx * sw.clientWidth, behavior: 'auto' });
+            sw.scrollTo({ left: page.offsetLeft, behavior: 'auto' });
           }
         });
       }

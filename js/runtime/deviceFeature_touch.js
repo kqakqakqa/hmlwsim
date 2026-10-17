@@ -66,12 +66,18 @@ const DeviceFeatureTouch = (() => {
     }
   }
 
+  function isVerticalScroller(node) {
+    return node.tagName === 'LIST'
+      ? getComputedStyle(node).flexDirection.startsWith('column')
+      : node.getAttribute('vertical') === 'true';
+  }
+
   function dragOwner(target, direction) {
     // 子元素先消费拖动；容器自身的监听不妨碍它滚动。
     let node = target;
     while (node && node !== _watchContent) {
-      if (node.tagName === 'LIST' && direction === 'vertical') return node;
-      if (node.tagName === 'SWIPER' && (node.getAttribute('vertical') === 'true') === (direction === 'vertical')) return node;
+      if (node.tagName === 'LIST' && isVerticalScroller(node) === (direction === 'vertical')) return node;
+      if (node.tagName === 'SWIPER' && isVerticalScroller(node) === (direction === 'vertical')) return node;
       const events = node._simulatorDragEvents;
       if (events && (events.has('touchstart') || events.has('touchmove') || events.has('swipe'))) return null;
       node = node.parentElement;
@@ -99,7 +105,7 @@ const DeviceFeatureTouch = (() => {
     }
     const owner = gesture.dragOwner;
     if (!owner || !owner.isConnected) return;
-    const isVertical = owner.tagName === 'LIST' || owner.getAttribute('vertical') === 'true';
+    const isVertical = isVerticalScroller(owner);
     if (isVertical) owner.scrollTop -= point.globalY - gesture.previousY;
     else owner.scrollLeft -= point.globalX - gesture.previousX;
     gesture.previousX = point.globalX;
@@ -117,13 +123,18 @@ const DeviceFeatureTouch = (() => {
     const owner = gesture.dragOwner;
     if (!owner || owner.tagName !== 'SWIPER') return;
     const isVertical = owner.getAttribute('vertical') === 'true';
-    const pageSize = isVertical ? owner.clientHeight : owner.clientWidth;
-    if (!pageSize) return;
+    const pages = Array.from(owner.children);
+    if (!pages.length) return;
     const offset = isVertical ? owner.scrollTop : owner.scrollLeft;
-    const index = Math.round(offset / pageSize);
+    const index = pages.reduce((nearest, page, pageIndex) => {
+      const pageOffset = isVertical ? page.offsetTop : page.offsetLeft;
+      const nearestOffset = isVertical ? pages[nearest].offsetTop : pages[nearest].offsetLeft;
+      return Math.abs(pageOffset - offset) < Math.abs(nearestOffset - offset) ? pageIndex : nearest;
+    }, 0);
+    const pageOffset = isVertical ? pages[index].offsetTop : pages[index].offsetLeft;
     owner.scrollTo(isVertical
-      ? { top: index * pageSize, behavior: 'smooth' }
-      : { left: index * pageSize, behavior: 'smooth' });
+      ? { top: pageOffset, behavior: 'smooth' }
+      : { left: pageOffset, behavior: 'smooth' });
   }
 
   const TAN_15 = Math.tan(15 * Math.PI / 180);
@@ -135,6 +146,18 @@ const DeviceFeatureTouch = (() => {
     _watchContent = watchContent;
     const root = watchContent.shadowRoot || watchContent;
     watchContent.style.touchAction = 'none';
+
+    root.addEventListener('wheel', (e) => {
+      if (!e.shiftKey) return;
+      const target = e.target && e.target.closest
+        ? e.target.closest('list, swiper')
+        : null;
+      if (!target || target.tagName === 'SWIPER' && target.getAttribute('vertical') === 'true'
+        || target.tagName === 'LIST' && isVerticalScroller(target)) return;
+      target.scrollLeft += e.deltaY || e.deltaX;
+      e.preventDefault();
+      e.stopPropagation();
+    }, { capture: true, passive: false });
 
     root.addEventListener('pointerdown', (e) => {
       if (!_enabled || _gesture || !e.isPrimary || e.button !== 0) return;

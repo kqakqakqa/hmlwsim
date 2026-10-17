@@ -27,13 +27,13 @@ const CSSAdapter = (() => {
 list {
   display: flex;
   flex-direction: column;
-  overflow-y: auto;
-  overflow-x: hidden;
+  overflow: auto;
   -webkit-overflow-scrolling: touch;
   scrollbar-width: none;
 }
 list::-webkit-scrollbar { display: none; }
 swiper {
+  position: relative;
   display: flex;
   flex-direction: row;
   overflow-x: auto;
@@ -88,7 +88,7 @@ text {
   90%, 100% { transform: translateX(0); }
 }
 img, image {
-  object-fit: contain;
+  object-fit: fill;
   display: block;
 }
 list-item {
