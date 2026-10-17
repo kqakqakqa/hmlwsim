@@ -343,6 +343,11 @@ function createSandbox() {
       if (!obj) return;
       for (const [event, handler] of Object.entries(obj)) {
         if (typeof handler === 'function') {
+          // 真机中子元素声明拖动处理后便消费手势，不需要应用调用 stopPropagation。
+          if (event === 'swipe' || event === 'touchstart' || event === 'touchmove') {
+            if (!el._simulatorDragEvents) el._simulatorDragEvents = new Set();
+            el._simulatorDragEvents.add(event);
+          }
           el.addEventListener(event, (e) => {
             // 真机上 swipe 由最近的处理组件消费，不再触发祖先的滑动返回。
             if (phase === 'stop' || phase === 'captureStop' || (event === 'swipe' && phase !== 'capture')) e.stopPropagation();

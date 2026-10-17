@@ -42,6 +42,7 @@ const DeviceFeatureTouch = (() => {
     _gesture = null;
     _suppressClick = true;
     clearTimeout(gesture.timer);
+    restoreSwiperSnap(gesture);
     if (gesture.touchStarted) emit('touchcancel', gesture);
     if (gesture.longPressed && !gesture.longPressReleased) emit('longpressrelease', gesture);
   }
@@ -64,6 +65,67 @@ const DeviceFeatureTouch = (() => {
       }
     }
   }
+
+  function dragOwner(target, direction) {
+    // 子元素先消费拖动；容器自身的监听不妨碍它滚动。
+    let node = target;
+    while (node && node !== _watchContent) {
+      if (node.tagName === 'LIST' && direction === 'vertical') return node;
+      if (node.tagName === 'SWIPER' && (node.getAttribute('vertical') === 'true') === (direction === 'vertical')) return node;
+      const events = node._simulatorDragEvents;
+      if (events && (events.has('touchstart') || events.has('touchmove') || events.has('swipe'))) return null;
+      node = node.parentElement;
+    }
+    return null;
+  }
+
+  function dragDirection(dx, dy) {
+    return Math.abs(dx) >= Math.abs(dy) ? 'horizontal' : 'vertical';
+  }
+
+  function scrollDragOwner(gesture, point) {
+    if (!gesture.dragResolved) {
+      const dx = point.globalX - gesture.start.globalX;
+      const dy = point.globalY - gesture.start.globalY;
+      gesture.dragOwner = dragOwner(gesture.target, dragDirection(dx, dy));
+      gesture.dragResolved = true;
+      const owner = gesture.dragOwner;
+      if (owner && owner.tagName === 'SWIPER') {
+        gesture.snapValue = owner.style.getPropertyValue('scroll-snap-type');
+        gesture.snapPriority = owner.style.getPropertyPriority('scroll-snap-type');
+        // 拖动期间禁用吸附，否则每次修改滚动位置都会被浏览器拉回整页。
+        owner.style.setProperty('scroll-snap-type', 'none', 'important');
+      }
+    }
+    const owner = gesture.dragOwner;
+    if (!owner || !owner.isConnected) return;
+    const isVertical = owner.tagName === 'LIST' || owner.getAttribute('vertical') === 'true';
+    if (isVertical) owner.scrollTop -= point.globalY - gesture.previousY;
+    else owner.scrollLeft -= point.globalX - gesture.previousX;
+    gesture.previousX = point.globalX;
+    gesture.previousY = point.globalY;
+  }
+
+  function restoreSwiperSnap(gesture) {
+    const owner = gesture.dragOwner;
+    if (!owner || owner.tagName !== 'SWIPER') return;
+    if (gesture.snapValue) owner.style.setProperty('scroll-snap-type', gesture.snapValue, gesture.snapPriority);
+    else owner.style.removeProperty('scroll-snap-type');
+  }
+
+  function finishSwiperDrag(gesture) {
+    const owner = gesture.dragOwner;
+    if (!owner || owner.tagName !== 'SWIPER') return;
+    const isVertical = owner.getAttribute('vertical') === 'true';
+    const pageSize = isVertical ? owner.clientHeight : owner.clientWidth;
+    if (!pageSize) return;
+    const offset = isVertical ? owner.scrollTop : owner.scrollLeft;
+    const index = Math.round(offset / pageSize);
+    owner.scrollTo(isVertical
+      ? { top: index * pageSize, behavior: 'smooth' }
+      : { left: index * pageSize, behavior: 'smooth' });
+  }
+
   const TAN_15 = Math.tan(15 * Math.PI / 180);
 
   function init() {
@@ -86,6 +148,8 @@ const DeviceFeatureTouch = (() => {
         touchStarted: false,
         longPressed: false,
       };
+      gesture.previousX = gesture.start.globalX;
+      gesture.previousY = gesture.start.globalY;
       _gesture = gesture;
       gesture.timer = setTimeout(() => {
         if (_gesture !== gesture || !gesture.target.isConnected) return;
@@ -99,17 +163,24 @@ const DeviceFeatureTouch = (() => {
       if (!gesture || e.pointerId !== gesture.pointerId) return;
       if (!gesture.target.isConnected) { cancel(); return; }
       update(gesture, e);
-      if (gesture.touchStarted) emit('touchmove', gesture);
+      if (gesture.touchStarted) {
+        const point = coordinates(e, gesture.target);
+        scrollDragOwner(gesture, point);
+        emit('touchmove', gesture);
+      }
     }, { capture: true, passive: true });
 
     window.addEventListener('pointerup', (e) => {
       const gesture = _gesture;
       if (!gesture || e.pointerId !== gesture.pointerId) return;
       update(gesture, e);
+      if (gesture.touchStarted) scrollDragOwner(gesture, coordinates(e, gesture.target));
       _gesture = null;
       clearTimeout(gesture.timer);
       _suppressClick = gesture.moved || gesture.longPressed;
       if (gesture.touchStarted) emit('touchend', gesture);
+      finishSwiperDrag(gesture);
+      restoreSwiperSnap(gesture);
       if (gesture.longPressed && !gesture.longPressReleased) emit('longpressrelease', gesture);
 
       const point = coordinates(e, gesture.target);
@@ -184,7 +255,10 @@ const DeviceFeatureTouch = (() => {
   function disable() {
     _enabled = false;
     _suppressClick = true;
-    if (_gesture) clearTimeout(_gesture.timer);
+    if (_gesture) {
+      clearTimeout(_gesture.timer);
+      restoreSwiperSnap(_gesture);
+    }
     _gesture = null;
   }
 
