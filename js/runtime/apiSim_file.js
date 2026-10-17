@@ -6,6 +6,8 @@
 const ApiSimFile = (() => {
   function readText(params) {
     DeviceFeatureVirtualFS.readText(params.uri, {
+      position: params.position,
+      length: params.length,
       success: params.success,
       fail: params.fail,
       complete: params.complete,

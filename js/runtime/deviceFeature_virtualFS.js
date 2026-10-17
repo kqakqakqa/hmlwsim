@@ -8,6 +8,7 @@
 const DeviceFeatureVirtualFS = (() => {
   const store = new Map();
   const LS_PREFIX = 'hmlwsim_fs_';
+  const LS_BINARY_PREFIX = 'hmlwsim_binary_';
   let _bundleName = '';
 
   function setBundleName(name) {
@@ -24,7 +25,11 @@ const DeviceFeatureVirtualFS = (() => {
   function init() {
     for (let i = 0; i < localStorage.length; i++) {
       const key = localStorage.key(i);
-      if (key.startsWith(LS_PREFIX)) {
+      if (key.startsWith(LS_BINARY_PREFIX)) {
+        const path = key.substring(LS_BINARY_PREFIX.length);
+        const binary = atob(localStorage.getItem(key));
+        store.set(path, Uint8Array.from(binary, ch => ch.charCodeAt(0)).buffer);
+      } else if (key.startsWith(LS_PREFIX)) {
         const path = key.substring(LS_PREFIX.length);
         store.set(path, localStorage.getItem(key));
       }
@@ -93,7 +98,13 @@ const DeviceFeatureVirtualFS = (() => {
     const path = normalizePath(uri);
     const content = store.get(path);
     if (content !== undefined) {
-      if (callbacks && typeof callbacks.success === 'function') callbacks.success({ text: content });
+      const bytes = typeof content === 'string' ? new TextEncoder().encode(content) : new Uint8Array(content);
+      const start = callbacks && callbacks.position !== undefined ? Math.max(0, callbacks.position) : 0;
+      const end = callbacks && callbacks.length !== undefined
+        ? Math.min(bytes.length, start + Math.max(0, callbacks.length))
+        : bytes.length;
+      const text = new TextDecoder('utf-8').decode(bytes.slice(start, end));
+      if (callbacks && typeof callbacks.success === 'function') callbacks.success({ text });
     } else {
       if (callbacks && typeof callbacks.fail === 'function') callbacks.fail('File not found', 301);
     }
@@ -107,14 +118,19 @@ const DeviceFeatureVirtualFS = (() => {
     const path = normalizePath(uri);
     let content = text;
     if (append) {
-      content = (store.get(path) || '') + text;
+      const previous = store.get(path) || '';
+      if (previous instanceof ArrayBuffer) {
+        const tail = new TextEncoder().encode(text);
+        const bytes = new Uint8Array(previous.byteLength + tail.length);
+        bytes.set(new Uint8Array(previous));
+        bytes.set(tail, previous.byteLength);
+        content = bytes.buffer;
+      } else {
+        content = previous + text;
+      }
     }
     store.set(path, content);
-    try {
-      localStorage.setItem(LS_PREFIX + path, content);
-    } catch (e) {
-      // localStorage full - silently fail
-    }
+    persist(path, content);
     if (callbacks && typeof callbacks.success === 'function') callbacks.success();
     if (callbacks && typeof callbacks.complete === 'function') callbacks.complete();
   }
@@ -125,9 +141,7 @@ const DeviceFeatureVirtualFS = (() => {
   function writeFile(uri, text) {
     const path = normalizePath(uri);
     store.set(path, text);
-    try {
-      localStorage.setItem(LS_PREFIX + path, text);
-    } catch (e) {}
+    persist(path, text);
   }
 
   /**
@@ -180,7 +194,10 @@ const DeviceFeatureVirtualFS = (() => {
   function deleteFile(uri, callbacks) {
     const path = normalizePath(uri);
     store.delete(path);
-    try { localStorage.removeItem(LS_PREFIX + path); } catch (e) {}
+    try {
+      localStorage.removeItem(LS_PREFIX + path);
+      localStorage.removeItem(LS_BINARY_PREFIX + path);
+    } catch (e) {}
     if (callbacks && typeof callbacks.success === 'function') callbacks.success();
     if (callbacks && typeof callbacks.complete === 'function') callbacks.complete();
   }
@@ -198,10 +215,11 @@ const DeviceFeatureVirtualFS = (() => {
       return;
     }
     store.set(dstPath, content);
+    persist(dstPath, content);
     store.delete(srcPath);
     try {
-      localStorage.setItem(LS_PREFIX + dstPath, content);
       localStorage.removeItem(LS_PREFIX + srcPath);
+      localStorage.removeItem(LS_BINARY_PREFIX + srcPath);
     } catch (e) {}
     if (callbacks && typeof callbacks.success === 'function') callbacks.success();
     if (callbacks && typeof callbacks.complete === 'function') callbacks.complete();
@@ -220,7 +238,7 @@ const DeviceFeatureVirtualFS = (() => {
       return;
     }
     store.set(dstPath, content);
-    try { localStorage.setItem(LS_PREFIX + dstPath, content); } catch (e) {}
+    persist(dstPath, content);
     if (callbacks && typeof callbacks.success === 'function') callbacks.success();
     if (callbacks && typeof callbacks.complete === 'function') callbacks.complete();
   }
@@ -232,7 +250,7 @@ const DeviceFeatureVirtualFS = (() => {
     const path = normalizePath(uri);
     if (store.has(path)) {
       if (callbacks && typeof callbacks.success === 'function') callbacks.success({
-        size: store.get(path).length || 0,
+        size: store.get(path) instanceof ArrayBuffer ? store.get(path).byteLength : new TextEncoder().encode(store.get(path)).length,
         exist: true,
       });
     } else {
@@ -247,18 +265,29 @@ const DeviceFeatureVirtualFS = (() => {
   function importFiles(files, bundleName) {
     const prefix = bundleName ? '/user/ace/run/' + bundleName + '/' : '';
     for (const [path, content] of Object.entries(files)) {
-      const normalized = resolvePath(prefix + path.replace(/\\/g, '/'));
-      let stored;
-      if (content instanceof ArrayBuffer) {
-        stored = arrayBufferToBase64(content);
-      } else if (typeof content === 'string') {
-        stored = content;
-      } else {
-        continue;
+      if (!(content instanceof ArrayBuffer) && typeof content !== 'string') continue;
+      const packagePath = path.replace(/\\/g, '/');
+      const normalized = resolvePath(prefix + packagePath);
+      store.set(normalized, content);
+      persist(normalized, content);
+      // 安装时将 rawfile 释放到应用沙盒，文件内容仍保留原始字节。
+      if (packagePath.startsWith('assets/entry/resources/rawfile/')) {
+        const relative = packagePath.substring('assets/entry/resources/'.length);
+        const dataPath = bundleName ? resolvePath('/user/ace/data/' + bundleName + '/' + relative) : relative;
+        store.set(dataPath, content);
+        persist(dataPath, content);
       }
-      store.set(normalized, stored);
-      try { localStorage.setItem(LS_PREFIX + normalized, stored); } catch (e) {}
     }
+  }
+
+  function persist(path, content) {
+    try {
+      localStorage.removeItem(LS_PREFIX + path);
+      localStorage.removeItem(LS_BINARY_PREFIX + path);
+      const binary = content instanceof ArrayBuffer;
+      localStorage.setItem((binary ? LS_BINARY_PREFIX : LS_PREFIX) + path,
+        binary ? arrayBufferToBase64(content) : content);
+    } catch (e) {}
   }
 
   function arrayBufferToBase64(buffer) {
@@ -275,7 +304,7 @@ const DeviceFeatureVirtualFS = (() => {
     const keys = [];
     for (let i = 0; i < localStorage.length; i++) {
       const key = localStorage.key(i);
-      if (key.startsWith(LS_PREFIX)) keys.push(key);
+      if (key.startsWith(LS_PREFIX) || key.startsWith(LS_BINARY_PREFIX)) keys.push(key);
     }
     keys.forEach(k => localStorage.removeItem(k));
   }
