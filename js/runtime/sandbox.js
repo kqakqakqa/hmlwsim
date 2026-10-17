@@ -246,6 +246,7 @@ function createSandbox() {
 
   function formatStyleValue(key, val) {
     if (val === undefined || val === null) return '';
+    if ((key === 'justifyContent' || key === 'justify-content') && val === 'space-between') return 'var(--simulator-space-between, space-between)';
     if (typeof val === 'boolean') return val ? 'true' : 'false';
     if (COLOR_PROPS.has(key)) return formatColor(val);
     if (STRING_PROPS.has(key)) return String(val);

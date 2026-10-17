@@ -59,6 +59,13 @@ div, list-item {
   display: flex;
   overflow: hidden;
 }
+* {
+  --simulator-space-between: initial;
+}
+/* 真机的 space-between 在只有一个直接子元素时沿主轴居中。 */
+:has(> :only-child) {
+  --simulator-space-between: center;
+}
 text {
   display: inline;
   white-space: pre-wrap;
