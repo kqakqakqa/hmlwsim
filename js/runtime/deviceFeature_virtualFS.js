@@ -176,19 +176,19 @@ const DeviceFeatureVirtualFS = (() => {
         if (relative.includes('/') || relative.includes('\\')) {
           const parts = relative.replace(/\\/g, '/').split('/').filter(Boolean);
           if (parts.length === 1) {
-            fileList.push({ uri: toInternalPath(path), type: 0 }); // 0 = file
+            fileList.push({ uri: parts[parts.length - 1], type: 0 }); // 0 = file
           } else {
             const dirName = parts[0];
             const dirEntry = fileList.find(f => f.uri.endsWith(dirName));
             if (!dirEntry) {
               fileList.push({
-                uri: toInternalPath(dirPath + '/' + dirName),
+                uri: dirName,
                 type: 1 // 1 = directory
               });
             }
           }
         } else if (relative && !relative.includes('/') && !relative.includes('\\')) {
-          fileList.push({ uri: toInternalPath(path), type: 0 });
+          fileList.push({ uri: relative, type: 0 });
         }
       }
     }
