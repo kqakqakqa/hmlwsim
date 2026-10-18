@@ -262,6 +262,24 @@ function createSandbox() {
     }).filter(Boolean).join(' ');
   }
 
+  function applyDefaultBorderStyles(el, styles) {
+    if (!styles) return;
+    const has = key => Object.prototype.hasOwnProperty.call(styles, key);
+    const hasExplicitStyle = has('borderStyle') || ['Top', 'Right', 'Bottom', 'Left'].some(side => has('border' + side + 'Style'));
+    const hasNonZeroWidth = key => {
+      if (!has(key)) return false;
+      const value = styles[key];
+      if (typeof value === 'number') return value > 0;
+      return value !== null && value !== undefined && !/^0(?:px)?$/.test(String(value).trim());
+    };
+    if (hasNonZeroWidth('borderWidth') && !hasExplicitStyle) el.style.borderStyle = 'solid';
+    for (const side of ['Top', 'Right', 'Bottom', 'Left']) {
+      if (hasNonZeroWidth('border' + side + 'Width') && !hasExplicitStyle && !has('border' + side + 'Style')) {
+        el.style['border-' + side.toLowerCase() + '-style'] = 'solid';
+      }
+    }
+  }
+
   function applyStyles(el, styles) {
     if (!styles) return;
     for (const [key, val] of Object.entries(styles)) {
@@ -269,6 +287,7 @@ function createSandbox() {
       if (key === 'boxShadowH' || key === 'boxShadowV' || key === 'boxShadowBlur' || key === 'boxShadowSpread' || key === 'boxShadowColor') continue;
       el.style[STYLE_PROP_MAP[key] || key] = formatStyleValue(key, val);
     }
+    applyDefaultBorderStyles(el, styles);
   }
 
   function _updateMarquee(el) {
@@ -296,22 +315,28 @@ function createSandbox() {
     }
 
     if (props.staticStyle) applyStyles(el, props.staticStyle);
+    const resolvedStyles = Object.assign({}, props.staticStyle || {});
 
     if (props.dynamicStyle) {
       for (const [key, fn] of Object.entries(props.dynamicStyle)) {
         if (typeof fn === 'function') {
           const { value: val, deps } = _reactive.track(fn);
           const cssProp = STYLE_PROP_MAP[key] || key;
-          if (val !== undefined && val !== null) el.style[cssProp] = formatStyleValue(key, val);
-          else requestAnimationFrame(() => { try { const v = fn(); if (v !== undefined && v !== null) el.style[cssProp] = formatStyleValue(key, v); } catch (_) { } });
+          if (val !== undefined && val !== null) {
+            el.style[cssProp] = formatStyleValue(key, val);
+            resolvedStyles[key] = val;
+          }
+          else requestAnimationFrame(() => { try { const v = fn(); if (v !== undefined && v !== null) { el.style[cssProp] = formatStyleValue(key, v); resolvedStyles[key] = v; applyDefaultBorderStyles(el, resolvedStyles); } } catch (_) { } });
           if (deps.size > 0) {
-            _reactive.addCleanup(_reactive.subscribe(deps, () => { try { const v = fn(); if (v !== undefined && v !== null) el.style[cssProp] = formatStyleValue(key, v); } catch (e) { } }));
+            _reactive.addCleanup(_reactive.subscribe(deps, () => { try { const v = fn(); if (v !== undefined && v !== null) { el.style[cssProp] = formatStyleValue(key, v); resolvedStyles[key] = v; applyDefaultBorderStyles(el, resolvedStyles); } } catch (e) { } }));
           }
         } else {
-          el.style[STYLE_PROP_MAP[key] || fn] = formatStyleValue(key, fn);
+          el.style[STYLE_PROP_MAP[key] || key] = formatStyleValue(key, fn);
+          resolvedStyles[key] = fn;
         }
       }
     }
+    applyDefaultBorderStyles(el, resolvedStyles);
 
     if (props.staticClass && Array.isArray(props.staticClass)) props.staticClass.forEach(cls => el.classList.add(cls));
     else if (typeof props.staticClass === 'string' && props.staticClass) props.staticClass.split(/\s+/).filter(Boolean).forEach(cls => el.classList.add(cls));
@@ -536,6 +561,17 @@ function createSandbox() {
           if (prop === 'boxShadowH' || prop === 'boxShadowV' || prop === 'boxShadowBlur' || prop === 'boxShadowSpread' || prop === 'boxShadowColor') continue;
           css += `${STYLE_PROP_MAP[prop] || prop}: ${formatStyleValue(prop, val)}; `;
         }
+        const hasExplicitStyle = Object.prototype.hasOwnProperty.call(styles, 'borderStyle') || ['Top', 'Right', 'Bottom', 'Left'].some(side => Object.prototype.hasOwnProperty.call(styles, 'border' + side + 'Style'));
+        const hasNonZeroWidth = key => {
+          if (!Object.prototype.hasOwnProperty.call(styles, key)) return false;
+          const value = styles[key];
+          if (typeof value === 'number') return value > 0;
+          return value !== null && value !== undefined && !/^0(?:px)?$/.test(String(value).trim());
+        };
+        if (hasNonZeroWidth('borderWidth') && !hasExplicitStyle) css += 'border-style: solid; ';
+        for (const side of ['Top', 'Right', 'Bottom', 'Left']) {
+          if (hasNonZeroWidth('border' + side + 'Width') && !hasExplicitStyle && !Object.prototype.hasOwnProperty.call(styles, 'border' + side + 'Style')) css += `border-${side.toLowerCase()}-style: solid; `;
+        }
         css += '}\n';
       }
       const idSelectors = styleSheet.idSelectors || {};
@@ -545,6 +581,17 @@ function createSandbox() {
           if (prop === 'boxShadow') { css += `box-shadow: ${buildBoxShadow(val)}; `; continue; }
           if (prop === 'boxShadowH' || prop === 'boxShadowV' || prop === 'boxShadowBlur' || prop === 'boxShadowSpread' || prop === 'boxShadowColor') continue;
           css += `${STYLE_PROP_MAP[prop] || prop}: ${formatStyleValue(prop, val)}; `;
+        }
+        const hasExplicitStyle = Object.prototype.hasOwnProperty.call(styles, 'borderStyle') || ['Top', 'Right', 'Bottom', 'Left'].some(side => Object.prototype.hasOwnProperty.call(styles, 'border' + side + 'Style'));
+        const hasNonZeroWidth = key => {
+          if (!Object.prototype.hasOwnProperty.call(styles, key)) return false;
+          const value = styles[key];
+          if (typeof value === 'number') return value > 0;
+          return value !== null && value !== undefined && !/^0(?:px)?$/.test(String(value).trim());
+        };
+        if (hasNonZeroWidth('borderWidth') && !hasExplicitStyle) css += 'border-style: solid; ';
+        for (const side of ['Top', 'Right', 'Bottom', 'Left']) {
+          if (hasNonZeroWidth('border' + side + 'Width') && !hasExplicitStyle && !Object.prototype.hasOwnProperty.call(styles, 'border' + side + 'Style')) css += `border-${side.toLowerCase()}-style: solid; `;
         }
         css += '}\n';
       }

@@ -10,6 +10,8 @@ const CSSAdapter = (() => {
   margin: 0;
   padding: 0;
   box-sizing: border-box;
+  border-width: 0;
+  border-style: none;
   -webkit-tap-highlight-color: transparent;
   flex-shrink: 0;
 }
