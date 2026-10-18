@@ -149,36 +149,71 @@ const App = (() => {
   }
 
   function setupScreenshot() {
-    const btn = document.getElementById('screenshot-btn');
-    if (btn) {
-      btn.addEventListener('click', takeScreenshot);
+    const saveBtn = document.getElementById('screenshot-save-btn');
+    const clipboardBtn = document.getElementById('screenshot-clipboard-btn');
+    if (saveBtn) {
+      saveBtn.addEventListener('click', saveScreenshot);
+    }
+    if (clipboardBtn) {
+      clipboardBtn.addEventListener('click', copyScreenshotToClipboard);
     }
   }
 
-  function takeScreenshot() {
+  function captureScreenshot() {
     const watchFrame = document.getElementById('watch-frame');
     if (!watchFrame) {
       log('Nothing to capture.', 'warn');
-      return;
+      return Promise.reject(new Error('Nothing to capture.'));
     }
     if (typeof html2canvas === 'undefined') {
       log('Libraries still loading, please wait...', 'warn');
-      return;
+      return Promise.reject(new Error('Libraries still loading.'));
     }
 
-    html2canvas(watchFrame, {
+    return html2canvas(watchFrame, {
       scale: 2,
       backgroundColor: null,
       useCORS: true,
       logging: false,
-    }).then(canvas => {
+    });
+  }
+
+  function saveScreenshot() {
+    captureScreenshot().then(canvas => {
       const link = document.createElement('a');
       link.download = 'screenshot_' + Date.now() + '.png';
       link.href = canvas.toDataURL('image/png');
       link.click();
       log('Screenshot saved.', 'info');
     }).catch(err => {
-      log('Screenshot failed: ' + err.message, 'error');
+      if (err.message !== 'Nothing to capture.' && err.message !== 'Libraries still loading.') {
+        log('Screenshot failed: ' + err.message, 'error');
+      }
+    });
+  }
+
+  function copyScreenshotToClipboard() {
+    if (!navigator.clipboard || typeof ClipboardItem === 'undefined') {
+      log('Clipboard image support is unavailable in this browser.', 'warn');
+      return;
+    }
+
+    captureScreenshot().then(canvas => new Promise((resolve, reject) => {
+      canvas.toBlob(blob => {
+        if (blob) {
+          resolve(navigator.clipboard.write([
+            new ClipboardItem({ 'image/png': blob })
+          ]));
+        } else {
+          reject(new Error('Failed to create screenshot image.'));
+        }
+      }, 'image/png');
+    })).then(() => {
+      log('Screenshot copied to clipboard.', 'info');
+    }).catch(err => {
+      if (err.message !== 'Nothing to capture.' && err.message !== 'Libraries still loading.') {
+        log('Copy screenshot failed: ' + err.message, 'error');
+      }
     });
   }
 

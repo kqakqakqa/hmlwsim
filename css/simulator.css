@@ -429,6 +429,18 @@ textarea {
   background: #005bb5;
 }
 
+#screenshot-clipboard-btn {
+  background: #34a853;
+}
+
+#screenshot-clipboard-btn:hover {
+  background: #2d9349;
+}
+
+#screenshot-clipboard-btn:active {
+  background: #24763a;
+}
+
 .danger-btn {
   width: 100%;
   padding: 0.625rem 0.875rem;
