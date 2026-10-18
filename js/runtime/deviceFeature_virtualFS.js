@@ -100,7 +100,7 @@ const DeviceFeatureVirtualFS = (() => {
     if (content !== undefined) {
       const bytes = typeof content === 'string' ? new TextEncoder().encode(content) : new Uint8Array(content);
       const start = callbacks && callbacks.position !== undefined ? Math.max(0, callbacks.position) : 0;
-      const end = callbacks && callbacks.length !== undefined
+      const end = callbacks && callbacks.length !== undefined && callbacks.length !== null
         ? Math.min(bytes.length, start + Math.max(0, callbacks.length))
         : bytes.length;
       const text = new TextDecoder('utf-8').decode(bytes.slice(start, end));
@@ -120,7 +120,7 @@ const DeviceFeatureVirtualFS = (() => {
     if (content !== undefined) {
       const bytes = typeof content === 'string' ? new TextEncoder().encode(content) : new Uint8Array(content);
       const start = callbacks && callbacks.position !== undefined ? Math.max(0, callbacks.position) : 0;
-      const end = callbacks && callbacks.length !== undefined
+      const end = callbacks && callbacks.length !== undefined && callbacks.length !== null
         ? Math.min(bytes.length, start + Math.max(0, callbacks.length))
         : bytes.length;
       if (callbacks && typeof callbacks.success === 'function') callbacks.success({ buffer: bytes.slice(start, end) });
