@@ -14,6 +14,16 @@ const ApiSimFile = (() => {
     });
   }
 
+  function readArrayBuffer(params) {
+    DeviceFeatureVirtualFS.readArrayBuffer(params.uri, {
+      position: params.position,
+      length: params.length,
+      success: params.success,
+      fail: params.fail,
+      complete: params.complete,
+    });
+  }
+
   function writeText(params) {
     DeviceFeatureVirtualFS.writeText(params.uri, params.text, params.append, {
       success: params.success,
@@ -70,5 +80,5 @@ const ApiSimFile = (() => {
     });
   }
 
-  return { readText, writeText, list, mkdir, delete: delete_, move, copy, getInfo };
+  return { readText, readArrayBuffer, writeText, list, mkdir, delete: delete_, move, copy, getInfo };
 })();

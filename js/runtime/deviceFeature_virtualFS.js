@@ -112,6 +112,25 @@ const DeviceFeatureVirtualFS = (() => {
   }
 
   /**
+   * Read binary file
+   */
+  function readArrayBuffer(uri, callbacks) {
+    const path = normalizePath(uri);
+    const content = store.get(path);
+    if (content !== undefined) {
+      const bytes = typeof content === 'string' ? new TextEncoder().encode(content) : new Uint8Array(content);
+      const start = callbacks && callbacks.position !== undefined ? Math.max(0, callbacks.position) : 0;
+      const end = callbacks && callbacks.length !== undefined
+        ? Math.min(bytes.length, start + Math.max(0, callbacks.length))
+        : bytes.length;
+      if (callbacks && typeof callbacks.success === 'function') callbacks.success({ buffer: bytes.slice(start, end) });
+    } else {
+      if (callbacks && typeof callbacks.fail === 'function') callbacks.fail('File not found', 301);
+    }
+    if (callbacks && typeof callbacks.complete === 'function') callbacks.complete();
+  }
+
+  /**
    * Write text file
    */
   function writeText(uri, text, append, callbacks) {
@@ -309,5 +328,5 @@ const DeviceFeatureVirtualFS = (() => {
     keys.forEach(k => localStorage.removeItem(k));
   }
 
-  return { init, setBundleName, getBundleName, readText, writeText, writeFile, list, mkdir, deleteFile, move, copy, getInfo, importFiles, clear };
+  return { init, setBundleName, getBundleName, readText, readArrayBuffer, writeText, writeFile, list, mkdir, deleteFile, move, copy, getInfo, importFiles, clear };
 })();
