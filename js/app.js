@@ -566,8 +566,9 @@ const App = (() => {
       const magic = dv.getUint32(0, true);
       if (magic !== 256) return null;
       const packed = dv.getUint32(4, true);
-      const width = (packed >> 16) & 0xFFFF;
-      const height = packed & 0xFFFF;
+      // 与 PNG 转 BIN 的写入格式一致：低 16 位为宽，高 16 位为高。
+      const width = packed & 0xFFFF;
+      const height = (packed >>> 16) & 0xFFFF;
       if (width <= 0 || height <= 0 || width > 4096 || height > 4096) return null;
       const pixelBytes = width * height * 4;
       if (dv.byteLength < 8 + pixelBytes) return null;
