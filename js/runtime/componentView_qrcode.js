@@ -4,7 +4,7 @@
  * 这里只负责按矩阵画到 canvas 上。
  */
 const ComponentViewQrcode = (() => {
-  const MIN_SIZE = 200;     // 文档规定的二维码最小边长
+  const QUIET_ZONE = 5;     // 二维码四周的静区宽度，单位是模块数
   const MAX_LENGTH = 256;   // value 长度上限
   const CIRCLE = 'circle';
 
@@ -42,13 +42,18 @@ const ComponentViewQrcode = (() => {
     const matrix = ensureMatrix(state);
     if (!matrix) return;
 
-    // 文档：宽高不一致时取较小值做边长，最终居中显示；最小 200px，
-    // 所以比 200px 小的组件会被裁掉四周（真机同款行为）。
-    const side = Math.max(MIN_SIZE, Math.min(width, height));
+    // 二维码大小完全跟随组件内容区：宽高不一致时取较小值做边长并居中，
+    // 组件给多大就画多大，不会再画出框外，也没有额外的最小边长限制。
+    const side = Math.min(width, height);
     const left = (width - side) / 2;
     const top = (height - side) / 2;
     const count = matrix.getModuleCount();
-    const moduleSize = side / count;
+    // 边长按「矩阵模块数 + 两侧静区」等分，静区算在组件框内部，
+    // 所以含白边在内仍然正好铺满框，不会撑破。
+    const moduleSize = side / (count + QUIET_ZONE * 2);
+    // 码体相对整块方形区域的内缩量，5 格白边就落在这段空白里。
+    const originX = left + QUIET_ZONE * moduleSize;
+    const originY = top + QUIET_ZONE * moduleSize;
 
     ctx.fillStyle = getComputedStyle(el).color;
     const circle = String(state.attrs.type || '') === CIRCLE;
@@ -58,13 +63,13 @@ const ComponentViewQrcode = (() => {
         if (!matrix.isDark(row, col)) continue;
         if (circle) {
           ctx.beginPath();
-          ctx.arc(left + (col + 0.5) * moduleSize, top + (row + 0.5) * moduleSize, moduleSize / 2, 0, Math.PI * 2);
+          ctx.arc(originX + (col + 0.5) * moduleSize, originY + (row + 0.5) * moduleSize, moduleSize / 2, 0, Math.PI * 2);
           ctx.fill();
         } else {
           // 模块边界取整到整像素，否则相邻模块之间会出现发丝缝。
-          const x = Math.round(left + col * moduleSize);
-          const y = Math.round(top + row * moduleSize);
-          ctx.fillRect(x, y, Math.round(left + (col + 1) * moduleSize) - x, Math.round(top + (row + 1) * moduleSize) - y);
+          const x = Math.round(originX + col * moduleSize);
+          const y = Math.round(originY + row * moduleSize);
+          ctx.fillRect(x, y, Math.round(originX + (col + 1) * moduleSize) - x, Math.round(originY + (row + 1) * moduleSize) - y);
         }
       }
     }
