@@ -410,9 +410,32 @@ const App = (() => {
       return { ext, dir, baseName, base };
     }
 
-    const imageResolver = (src) => {
-      const normalized = src.replace(/^\//, '');
+    // image 的 src 分两类：带 scheme 的 URI（internal://app/xxx，和 File API 走同一套 normalizePath），
+    // 和不带 scheme 的资源路径（只有 ../ 开头相对当前页面目录，其余都相对 app.js 所在目录）。
+    // 换算规则在 VFS 里，这里只负责把读到的字节转成浏览器能显示的 URL；
+    // 读不到再回落到下面的打包资源查找。
+    function readVfsImage(src, pageDir) {
+      if (typeof DeviceFeatureVirtualFS === 'undefined') return null;
+      let bytes = null;
+      DeviceFeatureVirtualFS.readResourceArrayBuffer(src, pageDir, {
+        success(res) { bytes = res.buffer; },
+        fail() { },
+      });
+      return bytes;
+    }
+
+    const imageResolver = (src, pageDir) => {
+      if (!src) return src;
+      // 已经解析过的直接返回，避免每次页面重绘都重新读一遍、再建一个新的 blob URL。
+      if (/^(blob:|data:)/.test(src)) return src;
+      const normalized = src.replace(/\\/g, '/').replace(/^\//, '');
       const { ext, dir, baseName, base } = splitPath(normalized);
+
+      const bytes = readVfsImage(src, pageDir);
+      if (bytes) {
+        const url = tryData(bytes, ext);
+        if (url) return url;
+      }
 
       // Try to find image in hapFiles first (full path)
       if (appData.hapFiles) {

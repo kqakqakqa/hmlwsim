@@ -115,7 +115,34 @@ const DeviceFeatureVirtualFS = (() => {
    * Read binary file
    */
   function readArrayBuffer(uri, callbacks) {
-    const path = normalizePath(uri);
+    readArrayBufferAt(normalizePath(uri), callbacks);
+  }
+
+  /**
+   * 资源引用（HML 里 image 的 src）的路径解析。
+   * 除了 ../ 开头的是相对当前页面目录，其余全部相对 app.js 所在目录，
+   * 也就是 assets/js/default/ —— 包括 /imgUri.png、imgUri.png、common/imgUri.png、
+   * 以及 /../../x.png 这种带前导 / 再上跳的写法。
+   * 这是资源语义，不是文件系统语义，所以不能塞进 normalizePath
+   * （那样 File API 会凭空多出一个基准目录）。
+   */
+  function resolveResourcePath(uri, pageDir) {
+    const raw = uri.replace(/\\/g, '/');
+    if (raw.startsWith('internal://')) return normalizePath(raw);
+    if (!_bundleName) return normalizePath(raw);
+    const root = '/user/ace/run/' + _bundleName + '/assets/js/default/';
+    if (raw.startsWith('../')) return resolvePath(root + (pageDir || '') + raw);
+    return resolvePath(root + raw.replace(/^\/+/, ''));
+  }
+
+  /**
+   * Read a packaged resource (image src) by its resource path
+   */
+  function readResourceArrayBuffer(uri, pageDir, callbacks) {
+    readArrayBufferAt(resolveResourcePath(uri, pageDir), callbacks);
+  }
+
+  function readArrayBufferAt(path, callbacks) {
     const content = store.get(path);
     if (content !== undefined) {
       const bytes = typeof content === 'string' ? new TextEncoder().encode(content) : new Uint8Array(content);
@@ -328,5 +355,5 @@ const DeviceFeatureVirtualFS = (() => {
     keys.forEach(k => localStorage.removeItem(k));
   }
 
-  return { init, setBundleName, getBundleName, readText, readArrayBuffer, writeText, writeFile, list, mkdir, deleteFile, move, copy, getInfo, importFiles, clear };
+  return { init, setBundleName, getBundleName, readText, readArrayBuffer, readResourceArrayBuffer, writeText, writeFile, list, mkdir, deleteFile, move, copy, getInfo, importFiles, clear };
 })();

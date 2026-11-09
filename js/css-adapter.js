@@ -105,10 +105,20 @@ stack > * {
   top: 0;
   left: 0;
 }
-progress {
-  -webkit-appearance: none;
-  appearance: none;
+/* progress / qrcode / chart 由 canvas 自绘，宿主只负责尺寸和裁剪。
+   progress 在真机上不是 HTML 元素，渲染时会换成 div，所以按属性选。 */
+[data-simulator-view-host] {
+  display: block;
+  overflow: hidden;
 }
+[data-simulator-view-host] > canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+/* 真机默认值：线性进度条 #6b9ac7，二维码黑码白底。 */
+[data-simulator-view-host="progress"] { color: #6b9ac7; }
+[data-simulator-view-host="qrcode"] { color: #000000; background-color: #ffffff; }
 input, button {
   border: none;
   outline: none;

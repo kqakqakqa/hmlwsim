@@ -138,7 +138,8 @@
         var overlay = document.getElementById('lib-loading-overlay');
         var libs = [
           'https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js',
-          'https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js'
+          'https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js',
+          'https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.js'
         ];
         var loaded = 0;
         function onLoad() {
@@ -196,6 +197,12 @@
 
     <!-- API Registry -->
     <script src="js/runtime/api-registry.js"></script>
+
+    <!-- Component Views: progress / qrcode / chart 用 canvas 自绘 -->
+    <script src="js/runtime/componentView.js"></script>
+    <script src="js/runtime/componentView_progress.js"></script>
+    <script src="js/runtime/componentView_qrcode.js"></script>
+    <script src="js/runtime/componentView_chart.js"></script>
 
     <!-- Runtime -->
     <script src="js/runtime/sandbox.js"></script>

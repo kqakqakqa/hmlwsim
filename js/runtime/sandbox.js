@@ -10,6 +10,8 @@ function createSandbox() {
   let _lastViewModel = null;
   let _lastError = null;
   let _imageSrcResolver = null;
+  // ../ 开头的资源路径相对当前页面目录，initPage 时记下来，渲染 image 时带给解析器。
+  let _currentPageDir = '';
   const _activeTimers = new Set();
   const _globalKeys = [];
   let _destroyed = false;
@@ -72,17 +74,38 @@ function createSandbox() {
     _lastViewModel = null;
     _lastError = null;
     _imageSrcResolver = null;
+    _currentPageDir = '';
   }
 
   function setOnAppTerminate(cb) { _onAppTerminate = cb; }
   function setImageSrcResolver(resolver) { _imageSrcResolver = resolver; }
 
   function _resolveImageSrc(src) {
-    if (typeof src === 'string' && _imageSrcResolver) return _imageSrcResolver(src);
+    if (typeof src === 'string' && _imageSrcResolver) return _imageSrcResolver(src, _currentPageDir);
     return src;
   }
 
+  // componentView*.js 是可选增强（progress / qrcode / chart 用 canvas 自绘）。
+  // 万一它没加载上（比如浏览器用了旧的 index.html 缓存），不能让整页渲染直接抛错 ——
+  // 那样连 $refs 都会丢，应用侧读 $refs.xxx 会接着炸。缺了就退化成普通元素。
+  let _componentViewWarned = false;
+
+  function _componentView(tag) {
+    if (typeof ComponentView === 'undefined') {
+      if (!_componentViewWarned) {
+        _componentViewWarned = true;
+        console.warn('[Sandbox] ComponentView 未加载，progress / qrcode / chart 会退化成普通元素；请强制刷新页面（Ctrl+Shift+R）。');
+      }
+      return null;
+    }
+    return ComponentView.has(tag) ? ComponentView : null;
+  }
+
   function _updateAttr(el, tag, key, val) {
+    // progress / qrcode / chart 的属性（percent、value、datasets ...）只是绘制参数，
+    // 交给对应控件记录并重绘；其余属性（ref、show 等）照常走下面。
+    const componentView = _componentView(tag);
+    if (componentView && componentView.setAttr(el, key, val)) return;
     if (key === 'ref') {
       el.setAttribute('data-ref', String(val));
     } else if (key === 'show') {
@@ -98,9 +121,6 @@ function createSandbox() {
     } else if (tag === 'swiper' && key === 'index') {
       el.setAttribute('index', String(val));
       DeviceFeatureDisplay.setSwiperIndex(el, val);
-    } else if (tag === 'progress') {
-      if (key === 'type') el.setAttribute('type', String(val));
-      else if (key === 'percent' || key === 'value') { el.setAttribute('value', String(val)); el.setAttribute('max', '100'); }
     } else if (tag === 'input') {
       if (key === 'type') el.setAttribute('type', String(val));
       else if (key === 'checked') el.checked = !!val;
@@ -172,6 +192,12 @@ function createSandbox() {
     gridAutoFlow: 'grid-auto-flow',
     scrollbarColor: 'scrollbar-color', scrollbarWidth: 'scrollbar-width',
     overscrollEffect: 'overscroll-behavior',
+    // progress 弧形进度条的专有样式。浏览器不认识这些属性名，直接挂在 style 上会被丢掉，
+    // 所以映射成自定义属性；绘制时用 getComputedStyle 读回来，
+    // 这样内联样式和 class 样式里的 start-angle / stroke-width 都能拿到。
+    startAngle: '--ohos-start-angle', totalAngle: '--ohos-total-angle',
+    centerX: '--ohos-center-x', centerY: '--ohos-center-y',
+    radius: '--ohos-radius', strokeWidth: '--ohos-stroke-width',
   };
 
   const COLOR_PROPS = new Set([
@@ -206,6 +232,7 @@ function createSandbox() {
     'borderLeftWidth', 'borderRightWidth', 'borderRadius', 'borderTopLeftRadius',
     'borderTopRightRadius', 'borderBottomLeftRadius', 'borderBottomRightRadius',
     'flexBasis', 'gridGap', 'gridColumnsGap', 'gridRowsGap',
+    'centerX', 'centerY', 'radius', 'strokeWidth',
   ]);
 
   function formatColor(val) {
@@ -280,12 +307,18 @@ function createSandbox() {
     }
   }
 
+  // 自定义属性（--xxx）不能像普通 CSS 属性那样直接挂在 style 对象上，必须走 setProperty。
+  function applyStyleValue(el, cssProp, value) {
+    if (cssProp.startsWith('--')) el.style.setProperty(cssProp, value);
+    else el.style[cssProp] = value;
+  }
+
   function applyStyles(el, styles) {
     if (!styles) return;
     for (const [key, val] of Object.entries(styles)) {
       if (key === 'boxShadow') { el.style['box-shadow'] = buildBoxShadow(val); continue; }
       if (key === 'boxShadowH' || key === 'boxShadowV' || key === 'boxShadowBlur' || key === 'boxShadowSpread' || key === 'boxShadowColor') continue;
-      el.style[STYLE_PROP_MAP[key] || key] = formatStyleValue(key, val);
+      applyStyleValue(el, STYLE_PROP_MAP[key] || key, formatStyleValue(key, val));
     }
     applyDefaultBorderStyles(el, styles);
   }
@@ -303,7 +336,9 @@ function createSandbox() {
   function _c(tag, props, children) {
     props = props || {};
     children = children || [];
-    const htmlTag = tag === 'image' ? 'img' : (tag === 'marquee' ? 'div' : tag);
+    // progress 在真机上不是 HTML 元素，用原生 <progress> 渲染只能得到一条浏览器样式的横条，
+    // 弧形样式和 color / stroke-width 全都无效，所以统一换成 div 自己画。
+    const htmlTag = tag === 'image' ? 'img' : (tag === 'marquee' || tag === 'progress' ? 'div' : tag);
     const el = document.createElement(htmlTag);
     if (tag === 'image') el.setAttribute('draggable', 'false');
     if (tag === 'marquee') {
@@ -313,6 +348,9 @@ function createSandbox() {
       el._marqueeContent = content;
       el.appendChild(content);
     }
+    // 必须在下面的 attrs 循环之前挂上，属性才有地方存。
+    const componentView = _componentView(tag);
+    if (componentView) componentView.attach(el, tag);
 
     if (props.staticStyle) applyStyles(el, props.staticStyle);
     const resolvedStyles = Object.assign({}, props.staticStyle || {});
@@ -323,15 +361,15 @@ function createSandbox() {
           const { value: val, deps } = _reactive.track(fn);
           const cssProp = STYLE_PROP_MAP[key] || key;
           if (val !== undefined && val !== null) {
-            el.style[cssProp] = formatStyleValue(key, val);
+            applyStyleValue(el, cssProp, formatStyleValue(key, val));
             resolvedStyles[key] = val;
           }
-          else requestAnimationFrame(() => { try { const v = fn(); if (v !== undefined && v !== null) { el.style[cssProp] = formatStyleValue(key, v); resolvedStyles[key] = v; applyDefaultBorderStyles(el, resolvedStyles); } } catch (_) { } });
+          else requestAnimationFrame(() => { try { const v = fn(); if (v !== undefined && v !== null) { applyStyleValue(el, cssProp, formatStyleValue(key, v)); resolvedStyles[key] = v; applyDefaultBorderStyles(el, resolvedStyles); } } catch (_) { } });
           if (deps.size > 0) {
-            _reactive.addCleanup(_reactive.subscribe(deps, () => { try { const v = fn(); if (v !== undefined && v !== null) { el.style[cssProp] = formatStyleValue(key, v); resolvedStyles[key] = v; applyDefaultBorderStyles(el, resolvedStyles); } } catch (e) { } }));
+            _reactive.addCleanup(_reactive.subscribe(deps, () => { try { const v = fn(); if (v !== undefined && v !== null) { applyStyleValue(el, cssProp, formatStyleValue(key, v)); resolvedStyles[key] = v; applyDefaultBorderStyles(el, resolvedStyles); } } catch (e) { } }));
           }
         } else {
-          el.style[STYLE_PROP_MAP[key] || key] = formatStyleValue(key, fn);
+          applyStyleValue(el, STYLE_PROP_MAP[key] || key, formatStyleValue(key, fn));
           resolvedStyles[key] = fn;
         }
       }
@@ -753,6 +791,8 @@ function createSandbox() {
 
   function initPage(pageCode, pagePath, appData) {
     _moduleCache.delete(pagePath);
+    // pagePath 形如 pages/index/index，../ 开头的资源路径以它的目录为基准。
+    _currentPageDir = pagePath.replace(/[^/]*$/, '');
     return executeModule(pageCode, pagePath, appData);
   }
 
